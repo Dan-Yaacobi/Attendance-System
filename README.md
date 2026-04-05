@@ -107,3 +107,14 @@ npm run dev
 - QR token security
 - Rate limiting
 - Better admin UX
+
+## 9. Database Setup
+- Create a PostgreSQL database for the backend.
+- Set `DATABASE_URL` in `backend/.env` to your database connection string.
+- Run migrations:
+  ```bash
+  cd backend
+  npm run migrate
+  ```
+
+Migrations are versioned SQL files that define schema changes over time. They are used to keep database structure consistent across environments and to apply changes safely in order.
