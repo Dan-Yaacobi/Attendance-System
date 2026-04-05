@@ -4,7 +4,21 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
 
-const query = (text, params) => pool.query(text, params);
+pool.on('error', (error) => {
+  console.error('Unexpected PostgreSQL pool error', error);
+});
+
+async function query(text, params) {
+  try {
+    return await pool.query(text, params);
+  } catch (error) {
+    console.error('Database query failed', {
+      message: error.message,
+      query: text
+    });
+    throw error;
+  }
+}
 
 module.exports = {
   pool,
