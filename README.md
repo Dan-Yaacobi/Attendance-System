@@ -78,7 +78,6 @@ This simple architecture was chosen to keep the scaffold clean, easy to evolve, 
 ```bash
 cd backend
 npm install
-cp .env.example .env
 npm run dev
 ```
 
@@ -86,7 +85,6 @@ npm run dev
 ```bash
 cd frontend
 npm install
-cp .env.example .env
 npm run dev
 ```
 
