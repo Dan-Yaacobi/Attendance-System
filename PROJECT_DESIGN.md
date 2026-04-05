@@ -1,520 +1,772 @@
 # PROJECT_DESIGN.md
 
-## 1. High-Level Architecture
+## 1. Purpose and Scope
 
-This system is a simple fullstack attendance platform where users scan a QR code for a course and the backend records attendance if they are eligible.
+This document defines the **implementation-ready design** for a QR-based attendance system with the following fixed stack:
 
-### Frontend (React)
-- Runs as a static web app on **Vercel**.
-- Provides:
-  - Public attendance flow pages (QR landing, sign-in form, status page).
-  - Admin panel pages (courses, participants, attendance management).
-- Stores `participant_uid` in `localStorage` for returning users.
-- Calls backend REST APIs over HTTPS.
+- **Frontend:** React
+- **Backend:** Node.js + Express
+- **Database:** PostgreSQL
+- **Database access:** `pg` with raw SQL
+- **Deployment:** Vercel (frontend) + Nexus (backend)
 
-### Backend (Node.js + Express)
-- Runs on **Nexus**.
-- Responsibilities:
-  - Validate course and participant eligibility.
-  - Create and validate participant device identity (`participant_uid`).
-  - Create attendance records with duplicate protection.
-  - Admin authentication and protected admin APIs.
-- Uses `pg` for direct SQL queries to PostgreSQL.
-
-### Database (PostgreSQL)
-- Source of truth for:
-  - Courses (including SAP identifier).
-  - Participants and course assignments.
-  - Device identities (`participant_uid`).
-  - Attendance entries.
-  - Admin accounts and sessions.
-- Enforces data integrity through foreign keys, unique constraints, and indexes.
-
-### End-to-End Request Flow
-1. User scans course QR code.
-2. React route reads course identifier from URL.
-3. Frontend checks `localStorage.participant_uid`.
-4. If present, frontend calls backend to validate identity + assignment + record attendance.
-5. If missing/invalid, frontend shows sign-in form (name, phone, email).
-6. Backend verifies user assignment for that course.
-7. Backend creates/updates participant identity, returns `participant_uid`, and inserts attendance.
-8. Frontend stores `participant_uid` and shows attendance success/failure.
-9. Admin users login and manage courses/participants/attendance via protected endpoints.
+This design is intentionally strict and deterministic so the full flow is easy to implement, test, and explain.
 
 ---
 
-## 2. Data Model (VERY IMPORTANT)
+## 2. Non-Negotiable Rules
 
-Below is a PostgreSQL schema designed to keep logic simple and strongly consistent.
+### 2.1 QR Logic
+QR payload contains **only** `course_id` (SAP identifier string). No participant info, no tokens in core flow.
 
-### 2.1 `courses`
-Represents each course with a unique SAP identifier.
+On QR access, backend must execute in this order:
+1. Validate course exists.
+2. Validate there is a session **today** for this course.
+3. If no session today, reject immediately and stop flow.
 
-```sql
-CREATE TABLE courses (
-  id BIGSERIAL PRIMARY KEY,
-  sap_identifier VARCHAR(64) NOT NULL UNIQUE,
-  code VARCHAR(32) NOT NULL,
-  title VARCHAR(255) NOT NULL,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
+### 2.2 Attendance Model
+Attendance is **session-based** (not course-based).
 
-### 2.2 `participants`
-Canonical participant profile.
+- Attendance record must reference `session_id`.
+- Duplicate prevention must be DB-enforced with:
+  - `UNIQUE (session_id, participant_id)`
 
-```sql
-CREATE TABLE participants (
-  id BIGSERIAL PRIMARY KEY,
-  full_name VARCHAR(150) NOT NULL,
-  email VARCHAR(255) NOT NULL,
-  phone VARCHAR(30) NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT participants_email_lower_uniq UNIQUE (LOWER(email)),
-  CONSTRAINT participants_phone_uniq UNIQUE (phone)
-);
-```
+### 2.3 Participant Truth Source
+Participants are pre-registered through admin panel before course starts.
 
-### 2.3 `course_participants`
-Assignment table: which participant is allowed in which course.
+- Assignment is course-specific.
+- Only assigned participants can mark attendance for sessions of that course.
 
-```sql
-CREATE TABLE course_participants (
-  id BIGSERIAL PRIMARY KEY,
-  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  participant_id BIGINT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT course_participant_unique UNIQUE (course_id, participant_id)
-);
-```
+### 2.4 Participant Matching (Strict)
+Sign-in matching order:
+1. Normalize phone and email.
+2. Attempt match by phone.
+3. If no phone match, attempt match by email.
+4. If phone and email match different participants, reject with conflict error.
+5. Name is informational only and is not used for matching.
 
-### 2.4 `participant_devices`
-Stores unique persistent IDs returned to frontend and saved in localStorage.
+### 2.5 Device UUID System
+- Frontend stores a device UUID in `localStorage`.
+- UUIDs are mapped in `participant_devices`.
+- Multiple devices per participant are allowed.
+- Invalid UUID requires forced re-login.
+- New login creates a **new** `participant_devices` row (never overwrite existing rows).
 
-```sql
-CREATE TABLE participant_devices (
-  participant_uid UUID PRIMARY KEY,
-  participant_id BIGINT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  is_active BOOLEAN NOT NULL DEFAULT TRUE
-);
-
-CREATE INDEX idx_participant_devices_participant_id
-  ON participant_devices(participant_id);
-```
-
-### 2.5 `attendance_records`
-Stores each attendance event.
-
-```sql
-CREATE TABLE attendance_records (
-  id BIGSERIAL PRIMARY KEY,
-  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  participant_id BIGINT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-  attendance_date DATE NOT NULL,
-  checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  source VARCHAR(20) NOT NULL DEFAULT 'qr',
-  removed_by_admin_id BIGINT NULL,
-  removed_at TIMESTAMPTZ NULL,
-  CONSTRAINT attendance_unique_per_day UNIQUE (course_id, participant_id, attendance_date)
-);
-
-CREATE INDEX idx_attendance_course_date
-  ON attendance_records(course_id, attendance_date);
-```
-
-> `attendance_unique_per_day` is the key anti-duplication rule: one participant can only be marked once per course per date.
-
-### 2.6 `admin_users`
-Simple admin login accounts.
-
-```sql
-CREATE TABLE admin_users (
-  id BIGSERIAL PRIMARY KEY,
-  email VARCHAR(255) NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-### 2.7 `admin_sessions`
-Server-managed session tokens for admin panel.
-
-```sql
-CREATE TABLE admin_sessions (
-  id BIGSERIAL PRIMARY KEY,
-  admin_user_id BIGINT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
-  session_token_hash TEXT NOT NULL UNIQUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL,
-  revoked_at TIMESTAMPTZ NULL
-);
-
-CREATE INDEX idx_admin_sessions_admin_user_id
-  ON admin_sessions(admin_user_id);
-```
-
-### Relationship Summary
-- `courses` 1—N `course_participants`
-- `participants` 1—N `course_participants`
-- `participants` 1—N `participant_devices`
-- `courses` 1—N `attendance_records`
-- `participants` 1—N `attendance_records`
-- `admin_users` 1—N `admin_sessions`
+### 2.6 Admin Panel Scope
+Admin panel is a full management system and must include:
+- Admin authentication
+- Course management
+- Session management
+- Participant assignment per course
+- Attendance viewing
+- Attendance correction/removal
+- Manual attendance entry
+- Audit logs
 
 ---
 
-## 3. API Design
+## 3. Repository Structure (Strict)
 
-Base URL example: `/api/v1`
+```text
+/frontend
+/backend
+  /routes
+  /db
+  /services
+  /middleware
+  /validators
+```
 
-All responses include JSON with either `{ success: true, data: ... }` or `{ success: false, error: ... }`.
+Recommended file allocation:
 
-### 3.1 Auth Routes (Admin)
+- `/backend/routes`: Express route modules (public + admin).
+- `/backend/db`: SQL query files or query helper modules using `pg`.
+- `/backend/services`: business rules (session validation, attendance write logic, audit logging).
+- `/backend/middleware`: auth middleware, error middleware, request context.
+- `/backend/validators`: request schema checks and normalization helpers.
 
-#### `POST /api/v1/admin/auth/login`
-- **Purpose:** Admin login.
-- **Request body:**
+---
+
+## 4. PostgreSQL Data Model (Final)
+
+## 4.1 Table: `courses`
+Represents course catalog records keyed by SAP identifier.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | Internal key |
+| course_id | VARCHAR(64) | NOT NULL, UNIQUE | SAP identifier used in QR |
+| course_code | VARCHAR(32) | NOT NULL | Human-readable code |
+| course_name | VARCHAR(255) | NOT NULL | Display name |
+| is_active | BOOLEAN | NOT NULL DEFAULT TRUE | Soft active state |
+| created_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+
+Indexes:
+- Unique index on `course_id`.
+- Index on `is_active`.
+
+## 4.2 Table: `course_sessions`
+Required table for session-based attendance.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | Session key |
+| course_id | BIGINT | NOT NULL, FK -> courses(id) ON DELETE CASCADE | Parent course |
+| session_date | DATE | NOT NULL | Date used for "today session" validation |
+| start_time | TIME | NULL | Optional |
+| end_time | TIME | NULL | Optional |
+| is_cancelled | BOOLEAN | NOT NULL DEFAULT FALSE | Excludes session from attendance |
+| created_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+
+Constraints:
+- `CHECK (end_time IS NULL OR start_time IS NULL OR end_time > start_time)`
+- `UNIQUE (course_id, session_date, start_time)` to prevent duplicate definitions.
+
+Indexes:
+- `(course_id, session_date)` for QR/day lookup.
+- Partial index on `(course_id, session_date)` where `is_cancelled = FALSE`.
+
+## 4.3 Table: `participants`
+Canonical participant profiles.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| full_name | VARCHAR(150) | NOT NULL | Informational for UI |
+| email | VARCHAR(255) | NOT NULL | Raw input retained |
+| email_normalized | VARCHAR(255) | NOT NULL | Lowercased + trimmed |
+| phone | VARCHAR(32) | NOT NULL | Raw input retained |
+| phone_normalized | VARCHAR(32) | NOT NULL | Canonical digits/format |
+| is_active | BOOLEAN | NOT NULL DEFAULT TRUE | |
+| created_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+
+Constraints:
+- `UNIQUE (email_normalized)`
+- `UNIQUE (phone_normalized)`
+
+Indexes:
+- Index on `is_active`.
+
+## 4.4 Table: `course_participants`
+Course assignment bridge (truth source for eligibility).
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| course_id | BIGINT | NOT NULL, FK -> courses(id) ON DELETE CASCADE | |
+| participant_id | BIGINT | NOT NULL, FK -> participants(id) ON DELETE CASCADE | |
+| assigned_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| assigned_by_admin_id | BIGINT | FK -> admins(id) ON DELETE SET NULL | Auditable |
+
+Constraints:
+- `UNIQUE (course_id, participant_id)`
+
+Indexes:
+- `(participant_id, course_id)`
+
+## 4.5 Table: `participant_devices`
+Maps frontend UUIDs to participant records.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| device_uuid | UUID | NOT NULL, UNIQUE | Stored in localStorage |
+| participant_id | BIGINT | NOT NULL, FK -> participants(id) ON DELETE CASCADE | |
+| first_seen_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| last_seen_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | Updated at successful use |
+| is_revoked | BOOLEAN | NOT NULL DEFAULT FALSE | Invalidates UUID |
+| created_via_course_id | BIGINT | FK -> courses(id) ON DELETE SET NULL | provenance |
+
+Indexes:
+- `(participant_id, is_revoked)`
+- `(device_uuid, is_revoked)`
+
+## 4.6 Table: `attendance_records`
+Session-based attendance events.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| session_id | BIGINT | NOT NULL, FK -> course_sessions(id) ON DELETE CASCADE | required |
+| participant_id | BIGINT | NOT NULL, FK -> participants(id) ON DELETE CASCADE | |
+| marked_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| source | VARCHAR(20) | NOT NULL | `qr` or `admin_manual` |
+| device_uuid | UUID | NULL | for QR flows |
+| status | VARCHAR(20) | NOT NULL DEFAULT 'present' | currently present only |
+| notes | TEXT | NULL | admin correction reason |
+| removed_at | TIMESTAMPTZ | NULL | soft removal |
+| removed_by_admin_id | BIGINT | NULL, FK -> admins(id) ON DELETE SET NULL | |
+
+Constraints:
+- `UNIQUE (session_id, participant_id)` (**required duplicate prevention**)
+- `CHECK (source IN ('qr', 'admin_manual'))`
+- `CHECK (status IN ('present'))`
+
+Indexes:
+- `(session_id, marked_at)`
+- `(participant_id, marked_at DESC)`
+- Partial index on `(session_id, participant_id)` where `removed_at IS NULL`
+
+## 4.7 Table: `admins`
+Admin identities for panel access.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| email | VARCHAR(255) | NOT NULL, UNIQUE | login identifier |
+| password_hash | TEXT | NOT NULL | bcrypt hash |
+| full_name | VARCHAR(120) | NOT NULL | display |
+| role | VARCHAR(30) | NOT NULL DEFAULT 'admin' | role-based futureproofing |
+| is_active | BOOLEAN | NOT NULL DEFAULT TRUE | |
+| created_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+
+## 4.8 Table: `admin_sessions`
+Server-side admin auth sessions.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| admin_id | BIGINT | NOT NULL, FK -> admins(id) ON DELETE CASCADE | |
+| session_token_hash | TEXT | NOT NULL, UNIQUE | hashed token in DB |
+| issued_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+| expires_at | TIMESTAMPTZ | NOT NULL | |
+| revoked_at | TIMESTAMPTZ | NULL | |
+| ip_address | INET | NULL | optional metadata |
+| user_agent | TEXT | NULL | optional metadata |
+
+Indexes:
+- `(admin_id, expires_at)`
+- Partial index where `revoked_at IS NULL`
+
+## 4.9 Table: `admin_audit_logs`
+Immutable admin action ledger.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | BIGSERIAL | PK | |
+| admin_id | BIGINT | NOT NULL, FK -> admins(id) ON DELETE RESTRICT | actor |
+| action_type | VARCHAR(80) | NOT NULL | e.g., `COURSE_CREATE` |
+| entity_type | VARCHAR(80) | NOT NULL | e.g., `course_sessions` |
+| entity_id | BIGINT | NULL | target row id |
+| request_id | UUID | NULL | traceability |
+| old_values | JSONB | NULL | before state |
+| new_values | JSONB | NULL | after state |
+| metadata | JSONB | NOT NULL DEFAULT '{}'::jsonb | context |
+| created_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+
+Indexes:
+- `(admin_id, created_at DESC)`
+- `(entity_type, entity_id, created_at DESC)`
+- `(action_type, created_at DESC)`
+
+---
+
+## 5. Core Backend Services
+
+### 5.1 `SessionValidationService`
+Input: `course_id` (SAP identifier).
+
+Steps:
+1. Resolve active course by `courses.course_id`.
+2. Resolve session for current date from `course_sessions` where:
+   - `course_id = resolved_course.id`
+   - `session_date = CURRENT_DATE`
+   - `is_cancelled = FALSE`
+3. If no matching row, return `NO_SESSION_TODAY` and stop.
+
+Output:
+- `course`
+- `session`
+
+### 5.2 `ParticipantResolutionService`
+Input from sign-in: `full_name`, `email`, `phone`, `course_id`.
+
+Steps:
+1. Normalize email and phone.
+2. Query by normalized phone.
+3. If not found, query by normalized email.
+4. If phone and email resolve to different participant IDs, return `PARTICIPANT_IDENTITY_CONFLICT`.
+5. Verify resolved participant is assigned in `course_participants` for course.
+6. If not assigned, return `NOT_ASSIGNED_TO_COURSE`.
+
+Output:
+- `participant`
+
+### 5.3 `DeviceService`
+- Validate incoming UUID in `participant_devices` and check `is_revoked = FALSE`.
+- On successful sign-in, insert a new `participant_devices` row with new UUID.
+- Never update existing row’s `device_uuid`.
+
+### 5.4 `AttendanceService`
+- Insert `attendance_records` with `session_id`, `participant_id`, `source`, `device_uuid`.
+- Use DB uniqueness `UNIQUE (session_id, participant_id)` as final dedupe guard.
+- If conflict, return `ALREADY_MARKED`.
+
+### 5.5 `AuditLogService`
+- Called by every admin mutating endpoint.
+- Writes `admin_audit_logs` row in same transaction as data change.
+
+---
+
+## 6. API Design (Complete)
+
+Base path: `/api/v1`
+
+Response envelope:
+
+```json
+{ "success": true, "data": {} }
+```
+or
+```json
+{ "success": false, "error": { "code": "ERROR_CODE", "message": "Readable message" } }
+```
+
+### 6.1 Public Attendance Endpoints
+
+#### 6.1.1 Validate QR / session entry point
+- **Method:** `POST`
+- **Route:** `/api/v1/attendance/entry`
+- **Purpose:** Initial backend validation from QR payload.
+- **Request:**
   ```json
-  { "email": "admin@domain.com", "password": "plaintext-password" }
+  { "course_id": "SAP-COURSE-1001" }
   ```
-- **Response (200):**
-  ```json
-  { "success": true, "data": { "adminId": 1 } }
-  ```
-- **Behavior:**
-  - Verify password using bcrypt hash.
-  - Create random session token.
-  - Store **hashed token** in `admin_sessions`.
-  - Return token in `HttpOnly` secure cookie.
-
-#### `POST /api/v1/admin/auth/logout`
-- **Purpose:** End admin session.
-- **Request body:** none.
-- **Response:** `{ "success": true }`
-- **Behavior:** Revoke current session (`revoked_at`).
-
-#### `GET /api/v1/admin/auth/me`
-- **Purpose:** Validate current admin session.
-- **Response:**
-  ```json
-  { "success": true, "data": { "adminId": 1, "email": "admin@domain.com" } }
-  ```
-
-### 3.2 Attendance & User Identification Routes
-
-#### `POST /api/v1/attendance/check-in-with-uid`
-- **Purpose:** Returning user attendance attempt using localStorage `participant_uid`.
-- **Request body:**
-  ```json
-  {
-    "courseSapIdentifier": "SAP-COURSE-123",
-    "participantUid": "uuid-value"
-  }
-  ```
-- **Response (success):**
+- **Success response:**
   ```json
   {
     "success": true,
     "data": {
-      "attendanceRecorded": true,
-      "alreadyMarkedToday": false,
-      "attendanceDate": "2026-04-05"
+      "course": { "id": 12, "course_id": "SAP-COURSE-1001", "course_name": "Database Systems" },
+      "session": { "id": 941, "session_date": "2026-04-05", "start_time": "09:00:00", "end_time": "11:00:00" }
     }
   }
   ```
-- **Failure cases:** invalid UID, not assigned, inactive course, duplicate today.
+- **Failure codes:** `COURSE_NOT_FOUND`, `COURSE_INACTIVE`, `NO_SESSION_TODAY`.
 
-#### `POST /api/v1/attendance/check-in-with-signin`
-- **Purpose:** New/forced re-login flow.
-- **Request body:**
+#### 6.1.2 Returning user attendance by UUID
+- **Method:** `POST`
+- **Route:** `/api/v1/attendance/mark-by-device`
+- **Purpose:** Fast path for previously logged-in participant.
+- **Request:**
   ```json
-  {
-    "courseSapIdentifier": "SAP-COURSE-123",
-    "fullName": "Jane Doe",
-    "email": "jane@mail.com",
-    "phone": "+15551234567"
-  }
+  { "course_id": "SAP-COURSE-1001", "device_uuid": "uuid-string" }
   ```
-- **Response (success):**
+- **Success response:**
   ```json
   {
     "success": true,
     "data": {
-      "participantUid": "generated-uuid",
-      "attendanceRecorded": true,
-      "alreadyMarkedToday": false,
-      "attendanceDate": "2026-04-05"
+      "attendance": {
+        "session_id": 941,
+        "participant_id": 3002,
+        "marked": true,
+        "already_marked": false
+      }
     }
   }
   ```
-- **Behavior:**
-  1. Find participant by normalized email/phone.
-  2. Validate assignment to course.
-  3. Create UID in `participant_devices` (or rotate/create new UID if needed).
-  4. Insert attendance (idempotent using unique constraint).
+- **Failure codes:** `INVALID_DEVICE_UUID`, `NO_SESSION_TODAY`, `NOT_ASSIGNED_TO_COURSE`, `COURSE_NOT_FOUND`.
 
-#### `POST /api/v1/participants/resolve-uid`
-- **Purpose:** Validate a stored UID and fetch minimal profile.
-- **Request body:**
+#### 6.1.3 Sign-in and mark attendance
+- **Method:** `POST`
+- **Route:** `/api/v1/attendance/sign-in`
+- **Purpose:** New user or forced re-login path.
+- **Request:**
   ```json
-  { "participantUid": "uuid-value" }
+  {
+    "course_id": "SAP-COURSE-1001",
+    "full_name": "Alex Doe",
+    "email": "alex@domain.com",
+    "phone": "+1 (555) 111-2222"
+  }
   ```
-- **Response:** participant summary or invalid.
-- **Use case:** frontend startup check before attempting auto check-in.
-
-### 3.3 Course Routes
-
-#### `GET /api/v1/courses/public/:sapIdentifier`
-- **Purpose:** Public course existence + active status for QR landing page.
-- **Response:**
+- **Success response:**
   ```json
   {
     "success": true,
-    "data": { "sapIdentifier": "SAP-COURSE-123", "title": "Database Systems", "isActive": true }
+    "data": {
+      "device_uuid": "new-uuid",
+      "participant_id": 3002,
+      "session_id": 941,
+      "marked": true,
+      "already_marked": false
+    }
   }
   ```
+- **Failure codes:** `NO_SESSION_TODAY`, `PARTICIPANT_NOT_FOUND`, `PARTICIPANT_IDENTITY_CONFLICT`, `NOT_ASSIGNED_TO_COURSE`.
 
-#### `GET /api/v1/admin/courses`
-- **Auth:** admin required.
-- **Purpose:** List all courses.
-
-#### `GET /api/v1/admin/courses/:courseId/participants`
-- **Auth:** admin required.
-- **Purpose:** View participants assigned to one course.
-
-#### `PATCH /api/v1/admin/courses/:courseId/participants/:participantId`
-- **Auth:** admin required.
-- **Purpose:** Edit participant details/assignment flags.
-- **Request body example:**
+#### 6.1.4 Device UUID verification
+- **Method:** `POST`
+- **Route:** `/api/v1/attendance/verify-device`
+- **Purpose:** Pre-flight UUID check before auto-mark.
+- **Request:**
   ```json
-  { "fullName": "Updated Name", "phone": "+15550000000" }
+  { "device_uuid": "uuid-string" }
+  ```
+- **Success response:**
+  ```json
+  { "success": true, "data": { "valid": true, "participant_id": 3002 } }
+  ```
+- **Failure codes:** `INVALID_DEVICE_UUID`.
+
+### 6.2 Admin Authentication Endpoints
+
+#### 6.2.1 Login
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/auth/login`
+- **Purpose:** Start admin session.
+- **Request:** `{ "email": "admin@org.com", "password": "plaintext" }`
+- **Response:** admin profile + HttpOnly session cookie.
+
+#### 6.2.2 Logout
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/auth/logout`
+- **Purpose:** Revoke active session.
+
+#### 6.2.3 Current admin
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/auth/me`
+- **Purpose:** Validate current cookie session and return admin identity.
+
+### 6.3 Admin Course Management
+
+#### 6.3.1 Create course
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/courses`
+- **Purpose:** Add course.
+
+#### 6.3.2 List courses
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/courses`
+- **Purpose:** Paginated course list with filters.
+
+#### 6.3.3 Get course detail
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/courses/:courseId`
+- **Purpose:** Single course data.
+
+#### 6.3.4 Update course
+- **Method:** `PATCH`
+- **Route:** `/api/v1/admin/courses/:courseId`
+- **Purpose:** Edit metadata/active flag.
+
+#### 6.3.5 Delete/deactivate course
+- **Method:** `DELETE`
+- **Route:** `/api/v1/admin/courses/:courseId`
+- **Purpose:** Controlled removal or deactivation policy.
+
+### 6.4 Admin Session Management
+
+#### 6.4.1 Create session
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/courses/:courseId/sessions`
+- **Purpose:** Add course session row.
+
+#### 6.4.2 List sessions for course
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/courses/:courseId/sessions`
+- **Purpose:** View schedule.
+
+#### 6.4.3 Update session
+- **Method:** `PATCH`
+- **Route:** `/api/v1/admin/sessions/:sessionId`
+- **Purpose:** Change date/time/cancel flag.
+
+#### 6.4.4 Delete session
+- **Method:** `DELETE`
+- **Route:** `/api/v1/admin/sessions/:sessionId`
+- **Purpose:** Remove invalid session.
+
+### 6.5 Admin Participant Assignment
+
+#### 6.5.1 Create participant
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/participants`
+- **Purpose:** Add participant to master table.
+
+#### 6.5.2 List participants
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/participants`
+- **Purpose:** Search by name/email/phone.
+
+#### 6.5.3 Update participant
+- **Method:** `PATCH`
+- **Route:** `/api/v1/admin/participants/:participantId`
+- **Purpose:** Correct profile data.
+
+#### 6.5.4 Assign participant to course
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/courses/:courseId/participants`
+- **Purpose:** Add assignment.
+
+#### 6.5.5 Remove participant from course
+- **Method:** `DELETE`
+- **Route:** `/api/v1/admin/courses/:courseId/participants/:participantId`
+- **Purpose:** Remove assignment.
+
+#### 6.5.6 List assigned participants
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/courses/:courseId/participants`
+- **Purpose:** Course roster view.
+
+### 6.6 Admin Attendance Management
+
+#### 6.6.1 List attendance
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/attendance`
+- **Purpose:** Filterable attendance table.
+- **Query params:** `course_id`, `session_date`, `participant_id`, pagination.
+
+#### 6.6.2 Manual attendance entry
+- **Method:** `POST`
+- **Route:** `/api/v1/admin/attendance/manual`
+- **Purpose:** Admin marks participant present for a session.
+- **Request:**
+  ```json
+  { "session_id": 941, "participant_id": 3002, "notes": "Late manual entry" }
   ```
 
-#### `POST /api/v1/admin/courses/:courseId/participants`
-- **Auth:** admin required.
-- **Purpose:** Assign participant to a course.
+#### 6.6.3 Remove/correct attendance
+- **Method:** `DELETE`
+- **Route:** `/api/v1/admin/attendance/:attendanceId`
+- **Purpose:** Soft-remove incorrect attendance with reason.
 
-#### `DELETE /api/v1/admin/courses/:courseId/participants/:participantId`
-- **Auth:** admin required.
-- **Purpose:** Remove participant assignment from course.
+### 6.7 Admin Audit Log Access
 
-### 3.4 Attendance Admin Routes
-
-#### `GET /api/v1/admin/attendance`
-- **Auth:** admin required.
-- **Query params:** `courseId`, `dateFrom`, `dateTo`, `participantEmail` (optional filters).
-- **Purpose:** Attendance listing/reporting.
-
-#### `DELETE /api/v1/admin/attendance/:attendanceId`
-- **Auth:** admin required.
-- **Purpose:** Remove incorrect attendance entries.
-- **Behavior:** soft-delete by setting `removed_at` and `removed_by_admin_id` (preferred for audit).
+#### 6.7.1 List audit logs
+- **Method:** `GET`
+- **Route:** `/api/v1/admin/audit-logs`
+- **Purpose:** Compliance and traceability view.
 
 ---
 
-## 4. Authentication Design
+## 7. Attendance Flows (Step-by-Step)
 
-### Admin Authentication (Simple but Secure)
-- Admin logs in with email/password.
-- Passwords are stored as bcrypt hashes (`password_hash`).
-- On successful login:
-  - Server creates a high-entropy random token.
-  - Store **hash of token** in `admin_sessions` with expiry (e.g., 7 days).
-  - Send raw token in `HttpOnly`, `Secure`, `SameSite=Strict` cookie.
-- For each protected admin request:
-  - Read cookie token.
-  - Hash it and match active non-expired session row.
+### 7.1 New User Flow
+1. User scans QR containing `course_id`.
+2. Frontend calls `POST /attendance/entry`.
+3. Backend validates course and today session.
+4. If valid, frontend shows sign-in form.
+5. User submits name/email/phone.
+6. Backend normalizes email/phone.
+7. Backend matches participant by strict rules.
+8. Backend confirms participant assigned to course.
+9. Backend creates new `device_uuid` row in `participant_devices`.
+10. Backend inserts `attendance_records` with `session_id`.
+11. Frontend stores new `device_uuid` in localStorage.
+12. Success page shown.
 
-### Why This Approach
-- Simpler than full OAuth/JWT infrastructure.
-- Secure enough for internal admin panel.
-- Session revocation is straightforward (`revoked_at`).
-- Keeps auth logic in one place with plain SQL.
+### 7.2 Returning User Flow
+1. User scans QR.
+2. Frontend calls `/attendance/entry` first.
+3. If session valid, frontend sends `/attendance/mark-by-device` using localStorage UUID.
+4. Backend validates UUID and resolves participant.
+5. Backend checks assignment to course.
+6. Backend inserts attendance.
+7. On unique conflict, return `already_marked=true`.
+8. Frontend shows attendance status.
 
----
+### 7.3 Invalid UUID Flow
+1. UUID lookup fails or is revoked.
+2. Backend returns `INVALID_DEVICE_UUID`.
+3. Frontend clears localStorage UUID.
+4. Frontend redirects to sign-in flow.
+5. On successful sign-in, backend creates new device row and returns new UUID.
 
-## 5. QR Code Logic
+### 7.4 No Session Today Flow
+1. QR scanned.
+2. `/attendance/entry` validates course.
+3. No session found for `CURRENT_DATE` (or session cancelled).
+4. Backend returns `NO_SESSION_TODAY`.
+5. Frontend shows non-actionable message; no sign-in and no attendance write.
 
-### QR Payload
-Use URL only, for example:
-
-`https://attendance.example.com/scan?course=SAP-COURSE-123`
-
-### Why only course identifier in QR
-- Keeps QR code stable and easy to regenerate.
-- No personally identifiable information in QR.
-- No secret embedded, so leakage risk is low.
-
-### Security Considerations
-- Server never trusts QR alone; it always validates participant assignment.
-- Optional lightweight protection: include short static course access token in query and verify server-side.
-- Rate-limit attendance endpoints by IP + course to reduce abuse.
-
----
-
-## 6. Attendance Logic
-
-### 6.1 New User Flow
-1. User scans QR and opens scan page.
-2. Frontend reads `course` from URL.
-3. `localStorage.participant_uid` missing → show sign-in form.
-4. User submits name, email, phone.
-5. Backend normalizes values (trim/lowercase email, canonical phone).
-6. Backend finds participant and confirms assignment in `course_participants`.
-7. If valid, backend creates `participant_uid` record in `participant_devices`.
-8. Backend inserts attendance row with `attendance_date = CURRENT_DATE`.
-9. Backend returns `participant_uid` and attendance status.
-10. Frontend stores UID and shows success.
-
-### 6.2 Returning User Flow
-1. Frontend finds `participant_uid` in localStorage.
-2. Calls `/attendance/check-in-with-uid`.
-3. Backend validates UID exists and is active.
-4. Backend resolves `participant_id` from UID.
-5. Backend verifies assignment to scanned course.
-6. Backend inserts attendance row for today.
-7. If unique constraint conflict occurs, return `alreadyMarkedToday: true`.
-
-### 6.3 Invalid ID Flow
-If UID is missing/invalid/mismatched:
-- Backend returns `INVALID_UID`.
-- Frontend clears localStorage UID and redirects to sign-in flow.
-
-### Duplicate Prevention
-- Primary guarantee: DB unique constraint `(course_id, participant_id, attendance_date)`.
-- API uses insert pattern:
-  ```sql
-  INSERT INTO attendance_records (...) VALUES (...)
-  ON CONFLICT (course_id, participant_id, attendance_date)
-  DO NOTHING;
-  ```
-- Response indicates whether insert happened.
-
----
-
-## 7. Edge Cases Handling
-
-### User deletes localStorage
-- App behaves like first-time user.
-- Sign-in revalidates assignment.
-- New UID may be issued.
-- Attendance still protected from duplicates by DB constraint.
-
-### User switches device
-- Old UID unavailable on new device.
-- User signs in again with name/email/phone.
-- If assigned, backend issues new UID linked to same participant.
-
-### User not assigned to course
-- Sign-in or UID check-in returns `NOT_ASSIGNED_TO_COURSE`.
-- Frontend shows clear error and no attendance record is created.
-
-### Concurrent check-ins
-- Multiple fast requests from same user/course/day can happen.
-- DB unique constraint resolves race safely.
-- At most one row is inserted; other requests return already-marked state.
+### 7.5 User Not Assigned Flow
+1. User reaches sign-in or UUID path.
+2. Backend resolves participant identity.
+3. `course_participants` lookup fails.
+4. Backend returns `NOT_ASSIGNED_TO_COURSE`.
+5. Frontend shows denial message; attendance not written.
 
 ---
 
 ## 8. Admin Panel Design
 
-### Core Pages / Components (React)
-1. **AdminLoginPage**
+## 8.1 Pages
+
+1. **Admin Login Page**
    - Email/password form.
-   - Calls `/admin/auth/login`.
+   - Stores only cookie-based session.
 
-2. **AdminLayout**
-   - Protected shell with top nav + logout.
-   - Calls `/admin/auth/me` on load.
+2. **Dashboard Page**
+   - Today’s sessions summary.
+   - Quick links: Courses, Sessions, Participants, Attendance, Audit Logs.
 
-3. **CoursesPage**
-   - Table of all courses.
-   - Link to participants + attendance views.
+3. **Courses Page**
+   - Create/edit/deactivate courses.
+   - Navigate to session and participant subpages.
 
-4. **CourseParticipantsPage**
-   - Participant list for selected course.
-   - Add/edit/remove assignment actions.
+4. **Course Sessions Page**
+   - List sessions for selected course.
+   - Add/update/delete/cancel sessions.
 
-5. **AttendancePage**
-   - Filterable attendance list.
-   - Remove attendance action with confirmation.
+5. **Participants Page**
+   - Create/edit participants.
+   - Search by normalized email/phone.
 
-### Data Flow
-- React components call backend REST endpoints.
-- Admin auth state is cookie-based; frontend does not manage raw tokens.
-- On 401 response, redirect to login.
+6. **Course Assignment Page**
+   - Assign/remove participants for selected course.
+   - Bulk visual roster management.
 
-### Key Features
-- Replace Google Sheets with relational records.
-- Single source of truth for roster + attendance.
-- Immediate correction tools (edit participant, remove attendance).
+7. **Attendance Page**
+   - Filter by date/course/session/participant.
+   - Manual attendance entry.
+   - Remove/correct attendance with reason.
+
+8. **Audit Logs Page**
+   - Read-only chronological logs with filters.
+   - Shows admin actor + action + old/new values.
+
+## 8.2 Admin Data Flow
+
+1. React calls admin endpoint with cookie session.
+2. Express auth middleware validates admin session from `admin_sessions`.
+3. Route validator checks payload/query.
+4. Service executes SQL transaction.
+5. If mutation occurs, service writes `admin_audit_logs` row.
+6. API returns updated dataset.
 
 ---
 
-## 9. Deployment Architecture
+## 9. Audit Logging Design
 
-### Vercel (Frontend)
-- Hosts React SPA static assets.
-- Environment variables:
-  - `VITE_API_BASE_URL` (e.g., `https://api.attendance.example.com/api/v1`)
+### 9.1 What is logged
+Every admin mutation logs one entry, including:
+- Admin login/logout (security events)
+- Course create/update/delete
+- Session create/update/delete/cancel
+- Participant create/update
+- Course assignment add/remove
+- Manual attendance entry
+- Attendance removal/correction
 
-### Nexus (Backend)
-- Hosts Express API.
+### 9.2 Log structure
+Each log row stores:
+- Actor (`admin_id`)
+- Action (`action_type`)
+- Target (`entity_type`, `entity_id`)
+- Before/after payload (`old_values`, `new_values`)
+- Request context (`request_id`, metadata such as IP/user-agent)
+- Creation timestamp
+
+### 9.3 When logs are created
+- Created in same DB transaction as the change.
+- If mutation fails/rolls back, corresponding log is not persisted.
+- Read operations are not logged in `admin_audit_logs`.
+
+---
+
+## 10. Validation and Normalization Strategy
+
+## 10.1 Input Validation
+- Validate request shape at route boundary.
+- Reject unknown/extra fields for write endpoints.
+- Validate primitive constraints:
+  - `course_id`: non-empty string, max length 64
+  - `email`: RFC-like format, max length 255
+  - `phone`: acceptable character set then normalize
+  - `device_uuid`: valid UUID format
+  - numeric route params: positive integers
+
+## 10.2 Normalization Rules
+- `email_normalized`:
+  - trim whitespace
+  - lowercase entire string
+- `phone_normalized`:
+  - strip spaces, dashes, parentheses
+  - standardize leading `+` and country code representation
+- Store raw and normalized values in participants table.
+
+## 10.3 Error Response Policy
+Common error format:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "NOT_ASSIGNED_TO_COURSE",
+    "message": "Participant is not assigned to this course."
+  }
+}
+```
+
+Standardized codes:
+- `VALIDATION_ERROR`
+- `COURSE_NOT_FOUND`
+- `COURSE_INACTIVE`
+- `NO_SESSION_TODAY`
+- `PARTICIPANT_NOT_FOUND`
+- `PARTICIPANT_IDENTITY_CONFLICT`
+- `NOT_ASSIGNED_TO_COURSE`
+- `INVALID_DEVICE_UUID`
+- `ALREADY_MARKED`
+- `UNAUTHORIZED_ADMIN`
+- `FORBIDDEN_ADMIN`
+- `INTERNAL_ERROR`
+
+---
+
+## 11. Security Model for QR and Attendance
+
+### 11.1 Core (Implemented)
+- QR carries only `course_id`.
+- Backend is sole authority for validation.
+- No attendance write is allowed unless a valid session exists today.
+- Session-based uniqueness blocks duplicate attendance.
+- Device UUID is validated server-side and can be revoked.
+
+### 11.2 Future Extension (Not Core Flow)
+- Add short-lived signed token in QR URL (e.g., minute-level expiry) to reduce link sharing abuse.
+- This extension is explicitly outside current core implementation and does not change baseline flow.
+
+---
+
+## 12. Deployment and Environment
+
+### 12.1 Frontend (Vercel)
+- Deploy React SPA.
+- Environment variable:
+  - `VITE_API_BASE_URL`
+
+### 12.2 Backend (Nexus)
+- Deploy Express API.
 - Environment variables:
   - `PORT`
   - `NODE_ENV`
   - `DATABASE_URL`
+  - `CORS_ALLOWED_ORIGIN`
   - `ADMIN_SESSION_TTL_HOURS`
   - `SESSION_COOKIE_NAME`
-  - `SESSION_COOKIE_SECURE=true`
+  - `SESSION_COOKIE_SECURE`
   - `BCRYPT_ROUNDS`
-  - `CORS_ALLOWED_ORIGIN` (Vercel frontend URL)
 
-### PostgreSQL
-- Managed instance accessible by backend.
-- TLS enabled for production connection.
-- Daily backups recommended.
-
-### Networking Notes
-- Frontend only talks to backend over HTTPS.
-- Backend only talks to PostgreSQL over secure connection.
+### 12.3 Database (PostgreSQL)
+- Backend-only access.
+- TLS enabled.
+- Regular backups and restore drills.
 
 ---
 
-## 10. Tradeoffs & Design Decisions
+## 13. Interview-Ready Rationale
 
-### Why no ORM
-- Requirement is strict use of simple SQL + `pg`.
-- Direct SQL is easy to reason about for this scope.
-- Lower abstraction means fewer hidden queries and easier debugging.
+1. **Session-based correctness:** Attendance is tied to actual meeting sessions, not generic course/date assumptions.
+2. **DB-first integrity:** Uniqueness and FKs enforce correctness under concurrency.
+3. **Deterministic identity matching:** Phone-first, then email, with explicit conflict rejection.
+4. **Device practicality without trust leakage:** UUID speeds repeat usage while backend remains source of truth.
+5. **Operational governance:** Full admin panel plus immutable audit logs supports real institutional workflows.
 
-### Why simple admin auth (session cookie)
-- Internal admin panel does not require external identity provider.
-- Server-side session revocation is straightforward.
-- `HttpOnly` cookie reduces token theft via XSS compared to localStorage tokens.
-
-### Why this data model
-- Many-to-many mapping (`course_participants`) cleanly models assignment.
-- `participant_devices` isolates device/localStorage identity from core participant record.
-- Attendance uniqueness is enforced at DB layer, not only application layer.
-
-### Why this API structure
-- Separate public attendance endpoints from admin endpoints.
-- Public endpoints are focused and minimal.
-- Admin endpoints are CRUD/reporting oriented.
-
-### Future Improvements (without changing current simplicity)
-1. Add admin audit log table for all changes.
-2. Add participant import endpoint (CSV upload) for bulk assignment.
-3. Add course-level attendance windows (start/end time).
-4. Add analytics endpoints (attendance percentage per course).
-5. Add optional QR signature to reduce tampered links.
-
-This design remains production-ready while keeping implementation simple for a small team and easy to explain by junior developers.
+This design is final, consistent, and directly implementable with React + Express + PostgreSQL + `pg` on Vercel/Nexus.
