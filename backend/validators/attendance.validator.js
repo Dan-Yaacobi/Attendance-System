@@ -5,22 +5,45 @@ function createValidationError(message) {
   return error;
 }
 
+function requireNonEmptyString(payload, fieldName) {
+  if (!payload || typeof payload[fieldName] !== 'string') {
+    throw createValidationError(`${fieldName} is required and must be a string.`);
+  }
+
+  const value = payload[fieldName].trim();
+
+  if (!value) {
+    throw createValidationError(`${fieldName} cannot be empty.`);
+  }
+
+  return value;
+}
+
 function validateAttendanceEntryPayload(payload) {
-  if (!payload || typeof payload.course_id !== 'string') {
-    throw createValidationError('course_id is required and must be a string.');
-  }
-
-  const courseId = payload.course_id.trim();
-
-  if (!courseId) {
-    throw createValidationError('course_id cannot be empty.');
-  }
-
   return {
-    course_id: courseId
+    course_id: requireNonEmptyString(payload, 'course_id')
+  };
+}
+
+function validateSignInPayload(payload) {
+  return {
+    course_id: requireNonEmptyString(payload, 'course_id'),
+    first_name: requireNonEmptyString(payload, 'first_name'),
+    last_name: requireNonEmptyString(payload, 'last_name'),
+    email: requireNonEmptyString(payload, 'email'),
+    phone: requireNonEmptyString(payload, 'phone')
+  };
+}
+
+function validateMarkByDevicePayload(payload) {
+  return {
+    course_id: requireNonEmptyString(payload, 'course_id'),
+    device_uuid: requireNonEmptyString(payload, 'device_uuid')
   };
 }
 
 module.exports = {
-  validateAttendanceEntryPayload
+  validateAttendanceEntryPayload,
+  validateSignInPayload,
+  validateMarkByDevicePayload
 };

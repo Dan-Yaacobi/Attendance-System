@@ -1,6 +1,12 @@
 const express = require('express');
 const { validateSessionForToday } = require('../services/session.service');
-const { validateAttendanceEntryPayload } = require('../validators/attendance.validator');
+const {
+  validateAttendanceEntryPayload,
+  validateSignInPayload,
+  validateMarkByDevicePayload
+} = require('../validators/attendance.validator');
+const { signInAndMarkAttendance } = require('../services/participant.service');
+const { markAttendanceByDevice } = require('../services/device.service');
 
 const router = express.Router();
 
@@ -18,12 +24,32 @@ router.post('/entry', async (req, res, next) => {
   }
 });
 
-router.post('/mark-by-device', (req, res) => {
-  res.status(501).json({ message: 'POST /attendance/mark-by-device placeholder' });
+router.post('/mark-by-device', async (req, res, next) => {
+  try {
+    const payload = validateMarkByDevicePayload(req.body);
+    const result = await markAttendanceByDevice(payload);
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
-router.post('/sign-in', (req, res) => {
-  res.status(501).json({ message: 'POST /attendance/sign-in placeholder' });
+router.post('/sign-in', async (req, res, next) => {
+  try {
+    const payload = validateSignInPayload(req.body);
+    const result = await signInAndMarkAttendance(payload);
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/verify-device', (req, res) => {
