@@ -30,6 +30,7 @@ function App() {
   const [deviceUuid, setDeviceUuid] = useState('');
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [success, setSuccess] = useState(false);
+
   const [form, setForm] = useState({
     first_name: '',
     last_name: '',
@@ -41,18 +42,7 @@ function App() {
     let isMounted = true;
 
     const setIfMounted = (setter, value) => {
-      if (isMounted) {
-        setter(value);
-      }
-    };
-
-    const parseErrorMessage = async (response) => {
-      try {
-        const data = await response.json();
-        return data?.error?.code || data?.code || data?.message || `Request failed (${response.status})`;
-      } catch {
-        return `Request failed (${response.status})`;
-      }
+      if (isMounted) setter(value);
     };
 
     const init = async () => {
@@ -68,25 +58,26 @@ function App() {
       setIfMounted(setError, '');
 
       try {
-        const entryResponse = await apiRequest('/attendance/entry', {
+        // 1. Entry
+        const { ok, data } = await apiRequest('/attendance/entry', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ course_id: courseId }),
         });
-        console.log('ENTRY RESPONSE:', entryResponse);
-        if (!entryResponse.ok) {
-          const entryError = await parseErrorMessage(entryResponse);
-          throw new Error(entryError);
+
+        console.log('ENTRY DATA:', data);
+
+        if (!ok || !data?.success) {
+          throw new Error(data?.error?.code || 'ENTRY_FAILED');
         }
 
-        const entryData = await entryResponse.json();
-        setIfMounted(setCourse, entryData.course || null);
-        setIfMounted(setSession, entryData.session || null);
+        setIfMounted(setCourse, data.course || null);
+        setIfMounted(setSession, data.session || null);
 
+        // 2. Check device UUID
         const storedDeviceUuid = getStoredDeviceUuid(courseId);
         console.log('Device UUID for course:', storedDeviceUuid);
+
         if (!storedDeviceUuid) {
           setIfMounted(setNeedsSignIn, true);
           return;
@@ -94,18 +85,18 @@ function App() {
 
         setIfMounted(setDeviceUuid, storedDeviceUuid);
 
-        const markResponse = await apiRequest('/attendance/mark-by-device', {
+        // 3. Try auto check-in
+        const markRes = await apiRequest('/attendance/mark-by-device', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             course_id: courseId,
             device_uuid: storedDeviceUuid,
           }),
         });
 
-        if (!markResponse.ok) {
+        if (!markRes.ok || !markRes.data?.success) {
+          console.log('Invalid UUID, clearing...');
           clearStoredDeviceUuid(courseId);
           setIfMounted(setDeviceUuid, '');
           setIfMounted(setNeedsSignIn, true);
@@ -114,7 +105,8 @@ function App() {
 
         setIfMounted(setSuccess, true);
       } catch (err) {
-        setIfMounted(setError, err?.message || 'Something went wrong');
+        console.error(err);
+        setIfMounted(setError, err.message || 'Something went wrong');
       } finally {
         setIfMounted(setLoading, false);
       }
@@ -127,16 +119,16 @@ function App() {
     };
   }, [courseId]);
 
-  const handleInputChange = (event) => {
-    const { name, value } = event.target;
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
     setForm((prev) => ({
       ...prev,
       [name]: value,
     }));
   };
 
-  const handleSignIn = async (event) => {
-    event.preventDefault();
+  const handleSignIn = async (e) => {
+    e.preventDefault();
 
     if (!courseId) {
       setError('Invalid QR');
@@ -147,11 +139,9 @@ function App() {
     setError('');
 
     try {
-      const response = await apiRequest('/attendance/sign-in', {
+      const { ok, data } = await apiRequest('/attendance/sign-in', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           course_id: courseId,
           first_name: form.first_name,
@@ -161,11 +151,10 @@ function App() {
         }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      console.log('SIGN-IN DATA:', data);
 
-      if (!response.ok) {
-        const signInError = data?.error?.code || data?.code || data?.message || `Request failed (${response.status})`;
-        throw new Error(signInError);
+      if (!ok || !data?.success) {
+        throw new Error(data?.error?.code || 'SIGN_IN_FAILED');
       }
 
       if (data?.device_uuid) {
@@ -176,14 +165,18 @@ function App() {
       setSuccess(true);
       setNeedsSignIn(false);
     } catch (err) {
-      setError(err?.message || 'Sign-in failed');
+      console.error(err);
+      setError(err.message || 'Sign-in failed');
     } finally {
       setLoading(false);
     }
   };
 
-  const sessionDate = session?.date || session?.session_date || session?.start_time || 'N/A';
-  const courseTitle = course?.title || course?.name || 'Course';
+  const sessionDate =
+    session?.date || session?.session_date || session?.start_time || 'N/A';
+
+  const courseTitle =
+    course?.title || course?.name || 'Course';
 
   return (
     <main style={{ fontFamily: 'Arial, sans-serif', padding: '2rem', maxWidth: '480px', margin: '0 auto' }}>
@@ -199,7 +192,11 @@ function App() {
           <p><strong>Course:</strong> {courseTitle}</p>
           <p><strong>Session Date:</strong> {sessionDate}</p>
           <p>Your attendance has been successfully recorded.</p>
-          {deviceUuid && <p style={{ fontSize: '0.875rem', color: '#555' }}>Device recognized.</p>}
+          {deviceUuid && (
+            <p style={{ fontSize: '0.875rem', color: '#555' }}>
+              Device recognized.
+            </p>
+          )}
         </section>
       )}
 
@@ -207,64 +204,31 @@ function App() {
         <section>
           <h2>Sign In</h2>
           <p>Please enter your details to mark attendance.</p>
+
           <form onSubmit={handleSignIn}>
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label htmlFor="first_name">First Name</label>
-              <input
-                id="first_name"
-                name="first_name"
-                value={form.first_name}
-                onChange={handleInputChange}
-                required
-                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-              />
-            </div>
+            {['first_name', 'last_name', 'phone', 'email'].map((field) => (
+              <div key={field} style={{ marginBottom: '0.75rem' }}>
+                <label>{field.replace('_', ' ')}</label>
+                <input
+                  name={field}
+                  value={form[field]}
+                  onChange={handleInputChange}
+                  required
+                  style={{ display: 'block', width: '100%', padding: '0.5rem' }}
+                />
+              </div>
+            ))}
 
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label htmlFor="last_name">Last Name</label>
-              <input
-                id="last_name"
-                name="last_name"
-                value={form.last_name}
-                onChange={handleInputChange}
-                required
-                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label htmlFor="phone">Phone</label>
-              <input
-                id="phone"
-                name="phone"
-                value={form.phone}
-                onChange={handleInputChange}
-                required
-                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label htmlFor="email">Email</label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                value={form.email}
-                onChange={handleInputChange}
-                required
-                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-              />
-            </div>
-
-            <button type="submit" disabled={loading} style={{ padding: '0.5rem 1rem' }}>
+            <button type="submit" disabled={loading}>
               Submit
             </button>
           </form>
         </section>
       )}
 
-      {!loading && !success && !needsSignIn && !error && <p>Preparing attendance flow...</p>}
+      {!loading && !success && !needsSignIn && !error && (
+        <p>Preparing attendance flow...</p>
+      )}
     </main>
   );
 }
