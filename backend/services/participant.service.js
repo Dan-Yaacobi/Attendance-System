@@ -17,68 +17,63 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
-async function findParticipantByIdentity(phone, email) {
-  const normalizedPhone = normalizePhone(phone);
-  const normalizedEmail = normalizeEmail(email);
-
-  const byPhoneResult = normalizedPhone
-    ? await db.query(
-        `SELECT *
-         FROM participants
-         WHERE phone_normalized = $1`,
-        [normalizedPhone]
-      )
-    : { rows: [] };
-
-  const byEmailResult = normalizedEmail
-    ? await db.query(
-        `SELECT *
-         FROM participants
-         WHERE email_normalized = $1`,
-        [normalizedEmail]
-      )
-    : { rows: [] };
-
-  const participantByPhone = byPhoneResult.rows[0] || null;
-  const participantByEmail = byEmailResult.rows[0] || null;
-
-  if (
-    participantByPhone &&
-    participantByEmail &&
-    participantByPhone.id !== participantByEmail.id
-  ) {
-    throw createServiceError(
-      'PARTICIPANT_IDENTITY_CONFLICT',
-      'Phone and email belong to different participants.',
-      409
-    );
-  }
-
-  const participant = participantByPhone || participantByEmail;
-
-  if (!participant) {
-    throw createServiceError('PARTICIPANT_NOT_FOUND', 'Participant was not found.', 404);
-  }
-
-  return participant;
-}
-
-async function ensureParticipantAssignedToCourse(participantId, courseId) {
-  const assignmentResult = await db.query(
-    `SELECT course_id, participant_id
-     FROM course_participants
-     WHERE participant_id = $1
-       AND course_id = $2`,
-    [participantId, courseId]
+async function ensureEnrollmentEligibility(courseId, phone, email) {
+  const eligibilityResult = await db.query(
+    `SELECT *
+     FROM course_enrollments
+     WHERE course_id = $1
+       AND (phone = $2 OR email = $3)
+     LIMIT 1`,
+    [courseId, phone, email]
   );
 
-  if (!assignmentResult.rows[0]) {
+  if (!eligibilityResult.rows[0]) {
     throw createServiceError(
-      'NOT_ASSIGNED_TO_COURSE',
-      'Participant is not assigned to this course.',
+      'NOT_ALLOWED',
+      'You are not eligible to sign in for this course.',
       403
     );
   }
+
+  return eligibilityResult.rows[0];
+}
+
+async function findOrCreateParticipant(payload, normalizedPhone, normalizedEmail) {
+  const participantResult = await db.query(
+    `SELECT *
+     FROM participants
+     WHERE phone_normalized = $1
+        OR email_normalized = $2
+     LIMIT 1`,
+    [normalizedPhone, normalizedEmail]
+  );
+
+  if (participantResult.rows[0]) {
+    return participantResult.rows[0];
+  }
+
+  const insertResult = await db.query(
+    `INSERT INTO participants (
+        first_name,
+        last_name,
+        phone,
+        phone_normalized,
+        email,
+        email_normalized
+     )
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [
+      payload.first_name,
+      payload.last_name,
+      payload.phone,
+      normalizedPhone,
+      payload.email,
+      normalizedEmail
+    ]
+  );
+
+  return insertResult.rows[0];
 }
 
 async function insertAttendanceRecord(sessionId, participantId, deviceUuid) {
@@ -100,10 +95,12 @@ async function insertAttendanceRecord(sessionId, participantId, deviceUuid) {
 }
 
 async function signInAndMarkAttendance(payload) {
-  const participant = await findParticipantByIdentity(payload.phone, payload.email);
+  const normalizedPhone = normalizePhone(payload.phone);
+  const normalizedEmail = normalizeEmail(payload.email);
   const { course, session } = await validateSessionForToday(payload.course_id);
 
-  await ensureParticipantAssignedToCourse(participant.id, course.id);
+  await ensureEnrollmentEligibility(course.id, normalizedPhone, normalizedEmail);
+  const participant = await findOrCreateParticipant(payload, normalizedPhone, normalizedEmail);
 
   const deviceUuid = uuidv4();
 
