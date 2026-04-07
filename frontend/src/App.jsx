@@ -30,7 +30,6 @@ function App() {
   const [deviceUuid, setDeviceUuid] = useState('');
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [success, setSuccess] = useState(false);
-
   const [form, setForm] = useState({
     first_name: '',
     last_name: '',
@@ -42,8 +41,11 @@ function App() {
     let isMounted = true;
 
     const setIfMounted = (setter, value) => {
-      if (isMounted) setter(value);
+      if (isMounted) {
+        setter(value);
+      }
     };
+
 
     const init = async () => {
       if (!courseId) {
@@ -58,26 +60,23 @@ function App() {
       setIfMounted(setError, '');
 
       try {
-        // 1. Entry
-        const { ok, data } = await apiRequest('/attendance/entry', {
+        const {ok,data} = await apiRequest('/attendance/entry', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({ course_id: courseId }),
         });
 
-        console.log('ENTRY DATA:', data);
-
-        if (!ok || !data?.success) {
-          throw new Error(data?.error?.code || 'ENTRY_FAILED');
+        if (!ok || !data.success) {
+          throw new Error(data?.error?.code || 'UNKNOWN_ERROR');
         }
 
-        setIfMounted(setCourse, data.course || null);
-        setIfMounted(setSession, data.session || null);
+        setCourse(data.course || null);
+        setSession(data.session || null);
 
-        // 2. Check device UUID
         const storedDeviceUuid = getStoredDeviceUuid(courseId);
         console.log('Device UUID for course:', storedDeviceUuid);
-
         if (!storedDeviceUuid) {
           setIfMounted(setNeedsSignIn, true);
           return;
@@ -85,18 +84,18 @@ function App() {
 
         setIfMounted(setDeviceUuid, storedDeviceUuid);
 
-        // 3. Try auto check-in
-        const markRes = await apiRequest('/attendance/mark-by-device', {
+        const markResponse = await apiRequest('/attendance/mark-by-device', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({
             course_id: courseId,
             device_uuid: storedDeviceUuid,
           }),
         });
 
-        if (!markRes.ok || !markRes.data?.success) {
-          console.log('Invalid UUID, clearing...');
+        if (!markResponse.ok || !markResponse.data?.success)  {
           clearStoredDeviceUuid(courseId);
           setIfMounted(setDeviceUuid, '');
           setIfMounted(setNeedsSignIn, true);
@@ -105,8 +104,7 @@ function App() {
 
         setIfMounted(setSuccess, true);
       } catch (err) {
-        console.error(err);
-        setIfMounted(setError, err.message || 'Something went wrong');
+        setIfMounted(setError, err?.message || 'Something went wrong');
       } finally {
         setIfMounted(setLoading, false);
       }
@@ -119,16 +117,16 @@ function App() {
     };
   }, [courseId]);
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
     setForm((prev) => ({
       ...prev,
       [name]: value,
     }));
   };
 
-  const handleSignIn = async (e) => {
-    e.preventDefault();
+  const handleSignIn = async (event) => {
+    event.preventDefault();
 
     if (!courseId) {
       setError('Invalid QR');
@@ -139,9 +137,11 @@ function App() {
     setError('');
 
     try {
-      const { ok, data } = await apiRequest('/attendance/sign-in', {
+      const {ok,data} = await apiRequest('/attendance/sign-in', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           course_id: courseId,
           first_name: form.first_name,
@@ -150,10 +150,8 @@ function App() {
           email: form.email,
         }),
       });
-
-      console.log('SIGN-IN DATA:', data);
-
-      if (!ok || !data?.success) {
+      
+      if (!ok || !data.success) {
         throw new Error(data?.error?.code || 'SIGN_IN_FAILED');
       }
 
@@ -165,18 +163,14 @@ function App() {
       setSuccess(true);
       setNeedsSignIn(false);
     } catch (err) {
-      console.error(err);
-      setError(err.message || 'Sign-in failed');
+      setError(err?.message || 'Sign-in failed');
     } finally {
       setLoading(false);
     }
   };
 
-  const sessionDate =
-    session?.date || session?.session_date || session?.start_time || 'N/A';
-
-  const courseTitle =
-    course?.title || course?.name || 'Course';
+  const sessionDate = session?.date || session?.session_date || session?.start_time || 'N/A';
+  const courseTitle = course?.title || course?.name || 'Course';
 
   return (
     <main style={{ fontFamily: 'Arial, sans-serif', padding: '2rem', maxWidth: '480px', margin: '0 auto' }}>
@@ -192,11 +186,7 @@ function App() {
           <p><strong>Course:</strong> {courseTitle}</p>
           <p><strong>Session Date:</strong> {sessionDate}</p>
           <p>Your attendance has been successfully recorded.</p>
-          {deviceUuid && (
-            <p style={{ fontSize: '0.875rem', color: '#555' }}>
-              Device recognized.
-            </p>
-          )}
+          {deviceUuid && <p style={{ fontSize: '0.875rem', color: '#555' }}>Device recognized.</p>}
         </section>
       )}
 
@@ -204,31 +194,64 @@ function App() {
         <section>
           <h2>Sign In</h2>
           <p>Please enter your details to mark attendance.</p>
-
           <form onSubmit={handleSignIn}>
-            {['first_name', 'last_name', 'phone', 'email'].map((field) => (
-              <div key={field} style={{ marginBottom: '0.75rem' }}>
-                <label>{field.replace('_', ' ')}</label>
-                <input
-                  name={field}
-                  value={form[field]}
-                  onChange={handleInputChange}
-                  required
-                  style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-                />
-              </div>
-            ))}
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label htmlFor="first_name">First Name</label>
+              <input
+                id="first_name"
+                name="first_name"
+                value={form.first_name}
+                onChange={handleInputChange}
+                required
+                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
+              />
+            </div>
 
-            <button type="submit" disabled={loading}>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label htmlFor="last_name">Last Name</label>
+              <input
+                id="last_name"
+                name="last_name"
+                value={form.last_name}
+                onChange={handleInputChange}
+                required
+                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label htmlFor="phone">Phone</label>
+              <input
+                id="phone"
+                name="phone"
+                value={form.phone}
+                onChange={handleInputChange}
+                required
+                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                value={form.email}
+                onChange={handleInputChange}
+                required
+                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
+              />
+            </div>
+
+            <button type="submit" disabled={loading} style={{ padding: '0.5rem 1rem' }}>
               Submit
             </button>
           </form>
         </section>
       )}
 
-      {!loading && !success && !needsSignIn && !error && (
-        <p>Preparing attendance flow...</p>
-      )}
+      {!loading && !success && !needsSignIn && !error && <p>Preparing attendance flow...</p>}
     </main>
   );
 }
