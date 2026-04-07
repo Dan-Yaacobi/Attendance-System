@@ -45,7 +45,7 @@ router.post('/sign-in', async (req, res, next) => {
 
     res.json({
       success: true,
-      data: result
+      ...result
     });
   } catch (error) {
     next(error);

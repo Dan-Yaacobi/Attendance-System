@@ -72,8 +72,8 @@ function App() {
           throw new Error(data?.error?.code || 'UNKNOWN_ERROR');
         }
 
-        setCourse(data.course || null);
-        setSession(data.session || null);
+        setCourse(data?.data?.course || null);
+        setSession(data?.data?.session || null);
 
         const storedDeviceUuid = getStoredDeviceUuid(courseId);
         console.log('Device UUID for course:', storedDeviceUuid);
@@ -155,10 +155,12 @@ function App() {
         throw new Error(data?.error?.code || 'SIGN_IN_FAILED');
       }
 
-      if (data?.device_uuid) {
-        setStoredDeviceUuid(courseId, data.device_uuid);
-        setDeviceUuid(data.device_uuid);
+      if (!data?.device_uuid) {
+        throw new Error('DEVICE_UUID_MISSING');
       }
+
+      setStoredDeviceUuid(courseId, data.device_uuid);
+      setDeviceUuid(data.device_uuid);
 
       setSuccess(true);
       setNeedsSignIn(false);
