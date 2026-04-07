@@ -1,6 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiRequest } from './api';
 
+function getDeviceKey(courseId) {
+  return `device_uuid_${courseId}`;
+}
+
+function getStoredDeviceUuid(courseId) {
+  return localStorage.getItem(getDeviceKey(courseId));
+}
+
+function setStoredDeviceUuid(courseId, uuid) {
+  localStorage.setItem(getDeviceKey(courseId), uuid);
+}
+
+function clearStoredDeviceUuid(courseId) {
+  localStorage.removeItem(getDeviceKey(courseId));
+}
+
 function App() {
   const courseId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -46,6 +62,8 @@ function App() {
         return;
       }
 
+      console.log('Course ID:', courseId);
+
       setIfMounted(setLoading, true);
       setIfMounted(setError, '');
 
@@ -67,7 +85,8 @@ function App() {
         setIfMounted(setCourse, entryData.course || null);
         setIfMounted(setSession, entryData.session || null);
 
-        const storedDeviceUuid = localStorage.getItem('device_uuid');
+        const storedDeviceUuid = getStoredDeviceUuid(courseId);
+        console.log('Device UUID for course:', storedDeviceUuid);
         if (!storedDeviceUuid) {
           setIfMounted(setNeedsSignIn, true);
           return;
@@ -87,7 +106,7 @@ function App() {
         });
 
         if (!markResponse.ok) {
-          localStorage.removeItem('device_uuid');
+          clearStoredDeviceUuid(courseId);
           setIfMounted(setDeviceUuid, '');
           setIfMounted(setNeedsSignIn, true);
           return;
@@ -150,7 +169,7 @@ function App() {
       }
 
       if (data?.device_uuid) {
-        localStorage.setItem('device_uuid', data.device_uuid);
+        setStoredDeviceUuid(courseId, data.device_uuid);
         setDeviceUuid(data.device_uuid);
       }
 
