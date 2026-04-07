@@ -45,7 +45,7 @@ router.post('/sign-in', async (req, res, next) => {
 
     res.json({
       success: true,
-      ...result
+      data: result
     });
   } catch (error) {
     next(error);
@@ -53,7 +53,13 @@ router.post('/sign-in', async (req, res, next) => {
 });
 
 router.post('/verify-device', (req, res) => {
-  res.status(501).json({ message: 'POST /attendance/verify-device placeholder' });
+  res.status(501).json({
+    success: false,
+    error: {
+      code: 'NOT_IMPLEMENTED',
+      message: 'POST /attendance/verify-device placeholder'
+    }
+  });
 });
 
 module.exports = router;

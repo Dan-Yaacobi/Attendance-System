@@ -155,12 +155,14 @@ function App() {
         throw new Error(data?.error?.code || 'SIGN_IN_FAILED');
       }
 
-      if (!data?.device_uuid) {
+      const signInData = data?.data;
+
+      if (!signInData?.device_uuid) {
         throw new Error('DEVICE_UUID_MISSING');
       }
 
-      setStoredDeviceUuid(courseId, data.device_uuid);
-      setDeviceUuid(data.device_uuid);
+      setStoredDeviceUuid(courseId, signInData.device_uuid);
+      setDeviceUuid(signInData.device_uuid);
 
       setSuccess(true);
       setNeedsSignIn(false);

@@ -114,7 +114,13 @@ async function signInAndMarkAttendance(payload) {
 
   return {
     device_uuid: deviceUuid,
-    participant_id: participant.id,
+    participant: {
+      id: participant.id,
+      first_name: participant.first_name,
+      last_name: participant.last_name,
+      phone: participant.phone,
+      email: participant.email
+    },
     session_id: session.id,
     already_marked: attendanceResult.already_marked,
     ...(attendanceResult.code ? { code: attendanceResult.code } : {})
