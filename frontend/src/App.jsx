@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiRequest } from './api';
 
 function App() {
   const courseId = useMemo(() => {
@@ -49,14 +50,14 @@ function App() {
       setIfMounted(setError, '');
 
       try {
-        const entryResponse = await fetch('/api/v1/attendance/entry', {
+        const entryResponse = await apiRequest('/attendance/entry', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ course_id: courseId }),
         });
-
+        console.log('ENTRY RESPONSE:', entryResponse);
         if (!entryResponse.ok) {
           const entryError = await parseErrorMessage(entryResponse);
           throw new Error(entryError);
@@ -74,7 +75,7 @@ function App() {
 
         setIfMounted(setDeviceUuid, storedDeviceUuid);
 
-        const markResponse = await fetch('/api/v1/attendance/mark-by-device', {
+        const markResponse = await apiRequest('/attendance/mark-by-device', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -127,7 +128,7 @@ function App() {
     setError('');
 
     try {
-      const response = await fetch('/api/v1/attendance/sign-in', {
+      const response = await apiRequest('/attendance/sign-in', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
