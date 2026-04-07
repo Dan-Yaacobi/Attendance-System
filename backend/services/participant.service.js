@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('node:crypto');
 const db = require('../db');
 const { validateSessionForToday } = require('./session.service');
 
@@ -102,7 +102,7 @@ async function signInAndMarkAttendance(payload) {
   await ensureEnrollmentEligibility(course.id, normalizedPhone, normalizedEmail);
   const participant = await findOrCreateParticipant(payload, normalizedPhone, normalizedEmail);
 
-  const deviceUuid = uuidv4();
+  const deviceUuid = randomUUID();
 
   await db.query(
     `INSERT INTO participant_devices (device_uuid, participant_id)
