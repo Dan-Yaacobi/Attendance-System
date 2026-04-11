@@ -1,0 +1,160 @@
+:root {
+  --lahav-navy: #0f2d52;
+  --lahav-navy-strong: #0a1e39;
+  --lahav-gold: #c69b55;
+  --lahav-bg: #f5f8fc;
+  --text-primary: #1b2430;
+  --text-muted: #5b6778;
+  --danger: #b42318;
+  --danger-bg: #fef3f2;
+  --success: #067647;
+  --success-bg: #ecfdf3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(165deg, var(--lahav-bg), #eaf0f8);
+  color: var(--text-primary);
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 2.5rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attendance-card {
+  width: 100%;
+  max-width: 560px;
+  background: #ffffff;
+  border: 1px solid #dde6f2;
+  border-top: 6px solid var(--lahav-gold);
+  border-radius: 14px;
+  padding: 1.5rem;
+  box-shadow: 0 14px 40px rgba(10, 30, 57, 0.11);
+}
+
+.card-header {
+  margin-bottom: 1.4rem;
+}
+
+.kicker {
+  margin: 0;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lahav-navy);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0.35rem 0;
+  color: var(--lahav-navy-strong);
+  font-size: 1.8rem;
+}
+
+h2 {
+  margin-top: 0;
+  color: var(--lahav-navy);
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.status-line {
+  color: var(--text-muted);
+}
+
+.alert {
+  border-radius: 12px;
+  padding: 1rem;
+  border: 1px solid;
+}
+
+.alert-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: #fecdca;
+}
+
+.alert-success {
+  background: var(--success-bg);
+  color: var(--success);
+  border-color: #abefc6;
+}
+
+.alert p,
+.alert h2 {
+  margin: 0 0 0.5rem;
+}
+
+.error-code,
+.hint {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.sign-in-form {
+  margin-top: 1rem;
+}
+
+.sign-in-form div {
+  margin-bottom: 0.9rem;
+}
+
+label {
+  display: inline-block;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+  color: var(--lahav-navy-strong);
+}
+
+input {
+  width: 100%;
+  padding: 0.68rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #c4d4ea;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
+}
+
+input:focus {
+  border-color: var(--lahav-gold);
+  box-shadow: 0 0 0 3px rgba(198, 155, 85, 0.25);
+  transform: translateY(-1px);
+}
+
+button {
+  appearance: none;
+  border: 0;
+  background: var(--lahav-navy);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.2s ease, background-color 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+  background: #143c6d;
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
