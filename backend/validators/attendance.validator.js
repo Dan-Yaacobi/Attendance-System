@@ -28,8 +28,6 @@ function validateAttendanceEntryPayload(payload) {
 function validateSignInPayload(payload) {
   return {
     course_id: requireNonEmptyString(payload, 'course_id'),
-    first_name: requireNonEmptyString(payload, 'first_name'),
-    last_name: requireNonEmptyString(payload, 'last_name'),
     email: requireNonEmptyString(payload, 'email'),
     phone: requireNonEmptyString(payload, 'phone')
   };

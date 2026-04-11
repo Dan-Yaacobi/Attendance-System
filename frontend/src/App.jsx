@@ -31,11 +31,10 @@ function App() {
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [success, setSuccess] = useState(false);
   const [form, setForm] = useState({
-    first_name: '',
-    last_name: '',
     phone: '',
     email: '',
   });
+  const [alreadyMarked, setAlreadyMarked] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -96,13 +95,29 @@ function App() {
         });
 
         if (!markResponse.ok || !markResponse.data?.success)  {
-          setIfMounted(setDeviceUuid, '');
-          setIfMounted(setNeedsSignIn, true);
-          return;
+          if (markResponse.data?.error?.code === 'INVALID_DEVICE_UUID') {
+            clearStoredDeviceUuid(courseId);
+            setIfMounted(setDeviceUuid, '');
+            setIfMounted(setNeedsSignIn, true);
+            return;
+          }
+
+          throw new Error(markResponse.data?.error?.code || 'MARK_BY_DEVICE_FAILED');
+        }
+
+        const markData = markResponse.data?.data;
+        if (markData?.already_marked) {
+          setIfMounted(setAlreadyMarked, true);
         }
 
         setIfMounted(setSuccess, true);
       } catch (err) {
+        if (err?.message === 'ALREADY_MARKED') {
+          setIfMounted(setAlreadyMarked, true);
+          setIfMounted(setSuccess, true);
+          return;
+        }
+
         setIfMounted(setError, err?.message || 'Something went wrong');
       } finally {
         setIfMounted(setLoading, false);
@@ -143,8 +158,6 @@ function App() {
         },
         body: JSON.stringify({
           course_id: courseId,
-          first_name: form.first_name,
-          last_name: form.last_name,
           phone: form.phone,
           email: form.email,
         }),
@@ -162,7 +175,7 @@ function App() {
 
       setStoredDeviceUuid(courseId, signInData.device_uuid);
       setDeviceUuid(signInData.device_uuid);
-
+      setAlreadyMarked(Boolean(signInData.already_marked));
       setSuccess(true);
       setNeedsSignIn(false);
     } catch (err) {
@@ -185,10 +198,14 @@ function App() {
 
       {!loading && success && (
         <section>
-          <h2>Attendance Marked</h2>
+          <h2>{alreadyMarked ? 'Attendance Already Marked' : 'Attendance Marked'}</h2>
           <p><strong>Course:</strong> {courseTitle}</p>
           <p><strong>Session Date:</strong> {sessionDate}</p>
-          <p>Your attendance has been successfully recorded.</p>
+          <p>
+            {alreadyMarked
+              ? 'You have already checked in for this session.'
+              : 'Your attendance has been successfully recorded.'}
+          </p>
           {deviceUuid && <p style={{ fontSize: '0.875rem', color: '#555' }}>Device recognized.</p>}
         </section>
       )}
@@ -196,32 +213,8 @@ function App() {
       {!loading && !success && needsSignIn && (
         <section>
           <h2>Sign In</h2>
-          <p>Please enter your details to mark attendance.</p>
+          <p>Please enter your phone and email to mark attendance.</p>
           <form onSubmit={handleSignIn}>
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label htmlFor="first_name">First Name</label>
-              <input
-                id="first_name"
-                name="first_name"
-                value={form.first_name}
-                onChange={handleInputChange}
-                required
-                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label htmlFor="last_name">Last Name</label>
-              <input
-                id="last_name"
-                name="last_name"
-                value={form.last_name}
-                onChange={handleInputChange}
-                required
-                style={{ display: 'block', width: '100%', padding: '0.5rem' }}
-              />
-            </div>
-
             <div style={{ marginBottom: '0.75rem' }}>
               <label htmlFor="phone">Phone</label>
               <input
