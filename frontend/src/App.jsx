@@ -41,6 +41,38 @@ function getFriendlyErrorMessage(code) {
   return FRIENDLY_ERROR_MESSAGES[code] || 'An unexpected error occurred. Please try again or contact support.';
 }
 
+function tryFixMojibake(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  if (!value.includes('×')) {
+    return value;
+  }
+
+  try {
+    return decodeURIComponent(escape(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatSessionDate(rawDate) {
+  if (!rawDate) {
+    return 'N/A';
+  }
+
+  const parsedDate = new Date(rawDate);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return String(rawDate);
+  }
+
+  const day = String(parsedDate.getUTCDate()).padStart(2, '0');
+  const month = String(parsedDate.getUTCMonth() + 1).padStart(2, '0');
+  const year = parsedDate.getUTCFullYear();
+  return `${day}-${month}-${year}`;
+}
+
 function App() {
   const courseId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -205,15 +237,16 @@ function App() {
     }
   };
 
-  const sessionDate = session?.date || session?.session_date || session?.start_time || 'N/A';
-  const courseTitle = course?.title || course?.name || course?.course_title || 'Course';
+  const sessionDateRaw = session?.date || session?.session_date || session?.start_time || '';
+  const sessionDate = formatSessionDate(sessionDateRaw);
+  const courseTitleRaw = course?.title || course?.name || course?.course_title || 'Course';
+  const courseTitle = tryFixMojibake(courseTitleRaw);
   const errorMessage = errorCode ? getFriendlyErrorMessage(errorCode) : '';
 
   return (
     <main className="app-shell">
       <section className="attendance-card">
         <header className="card-header">
-          <p className="kicker">Lahav-style Course Portal</p>
           <h1>Attendance Check-In</h1>
           <p className="subtitle">Secure QR attendance for today&apos;s session.</p>
         </header>

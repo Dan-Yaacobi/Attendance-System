@@ -1,10 +1,11 @@
 :root {
-  --lahav-navy: #0f2d52;
-  --lahav-navy-strong: #0a1e39;
+  --lahav-purple: #5b2ca0;
+  --lahav-purple-strong: #3f1f7a;
+  --lahav-purple-soft: #efe8ff;
   --lahav-gold: #c69b55;
-  --lahav-bg: #f5f8fc;
-  --text-primary: #1b2430;
-  --text-muted: #5b6778;
+  --lahav-bg: #f4f0ff;
+  --text-primary: #261a3f;
+  --text-muted: #5f4d85;
   --danger: #b42318;
   --danger-bg: #fef3f2;
   --success: #067647;
@@ -18,7 +19,7 @@
 body {
   margin: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(165deg, var(--lahav-bg), #eaf0f8);
+  background: linear-gradient(160deg, #f8f4ff, #ece2ff 45%, #e2d2ff);
   color: var(--text-primary);
 }
 
@@ -33,12 +34,12 @@ body {
 .attendance-card {
   width: 100%;
   max-width: 560px;
-  background: #ffffff;
-  border: 1px solid #dde6f2;
-  border-top: 6px solid var(--lahav-gold);
+  background: linear-gradient(180deg, #ffffff, #fbf8ff);
+  border: 1px solid #ddcffd;
+  border-top: 6px solid var(--lahav-purple);
   border-radius: 14px;
   padding: 1.5rem;
-  box-shadow: 0 14px 40px rgba(10, 30, 57, 0.11);
+  box-shadow: 0 16px 44px rgba(63, 31, 122, 0.18);
 }
 
 .card-header {
@@ -49,20 +50,20 @@ body {
   margin: 0;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--lahav-navy);
+  color: var(--lahav-purple);
   font-size: 0.8rem;
   font-weight: 700;
 }
 
 h1 {
   margin: 0.35rem 0;
-  color: var(--lahav-navy-strong);
+  color: var(--lahav-purple-strong);
   font-size: 1.8rem;
 }
 
 h2 {
   margin-top: 0;
-  color: var(--lahav-navy);
+  color: var(--lahav-purple-strong);
 }
 
 .subtitle {
@@ -115,28 +116,28 @@ label {
   display: inline-block;
   margin-bottom: 0.3rem;
   font-weight: 600;
-  color: var(--lahav-navy-strong);
+  color: var(--lahav-purple-strong);
 }
 
 input {
   width: 100%;
   padding: 0.68rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid #c4d4ea;
+  border: 1px solid #cab6f7;
   outline: none;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
 }
 
 input:focus {
-  border-color: var(--lahav-gold);
-  box-shadow: 0 0 0 3px rgba(198, 155, 85, 0.25);
+  border-color: var(--lahav-purple);
+  box-shadow: 0 0 0 3px rgba(91, 44, 160, 0.2);
   transform: translateY(-1px);
 }
 
 button {
   appearance: none;
   border: 0;
-  background: var(--lahav-navy);
+  background: var(--lahav-purple);
   color: #fff;
   border-radius: 10px;
   padding: 0.7rem 1rem;
@@ -146,7 +147,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #143c6d;
+  background: var(--lahav-purple-strong);
   transform: translateY(-1px);
 }
 
