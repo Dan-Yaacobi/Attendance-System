@@ -10,10 +10,21 @@ function createServiceError(code, message, status) {
 
 async function ensureParticipantAssignedToCourse(participantId, courseId) {
   const assignmentResult = await db.query(
-    `SELECT course_id, participant_id
-     FROM course_participants
-     WHERE participant_id = $1
-       AND course_id = $2`,
+    `SELECT cp.course_id
+     FROM course_participants cp
+     WHERE cp.participant_id = $1
+       AND cp.course_id = $2
+     UNION
+     SELECT ce.course_id
+     FROM participants p
+     JOIN course_enrollments ce
+       ON ce.course_id = $2
+      AND (
+        regexp_replace(COALESCE(ce.phone, ''), '\D', '', 'g') = p.phone_normalized
+        OR lower(trim(COALESCE(ce.email, ''))) = p.email_normalized
+      )
+     WHERE p.id = $1
+     LIMIT 1`,
     [participantId, courseId]
   );
 
@@ -24,6 +35,13 @@ async function ensureParticipantAssignedToCourse(participantId, courseId) {
       403
     );
   }
+
+  await db.query(
+    `INSERT INTO course_participants (course_id, participant_id)
+     VALUES ($1, $2)
+     ON CONFLICT (course_id, participant_id) DO NOTHING`,
+    [courseId, participantId]
+  );
 }
 
 async function insertAttendanceRecord(sessionId, participantId, deviceUuid) {

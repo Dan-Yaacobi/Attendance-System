@@ -22,7 +22,10 @@ async function ensureEnrollmentEligibility(courseId, phone, email) {
     `SELECT *
      FROM course_enrollments
      WHERE course_id = $1
-       AND (phone = $2 OR email = $3)
+       AND (
+         regexp_replace(COALESCE(phone, ''), '\D', '', 'g') = $2
+         OR lower(trim(COALESCE(email, ''))) = $3
+       )
      LIMIT 1`,
     [courseId, phone, email]
   );
@@ -38,7 +41,35 @@ async function ensureEnrollmentEligibility(courseId, phone, email) {
   return eligibilityResult.rows[0];
 }
 
-async function findOrCreateParticipant(payload, normalizedPhone, normalizedEmail) {
+async function ensureParticipantAssignedToCourse(participantId, courseId) {
+  await db.query(
+    `INSERT INTO course_participants (course_id, participant_id)
+     VALUES ($1, $2)
+     ON CONFLICT (course_id, participant_id) DO NOTHING`,
+    [courseId, participantId]
+  );
+}
+
+async function revokeParticipantCourseDevices(participantId, courseId) {
+  await db.query(
+    `UPDATE participant_devices pd
+     SET is_revoked = TRUE
+     WHERE pd.participant_id = $1
+       AND pd.is_revoked = FALSE
+       AND EXISTS (
+         SELECT 1
+         FROM attendance_records ar
+         JOIN course_sessions cs
+           ON cs.id = ar.session_id
+         WHERE ar.device_uuid = pd.device_uuid
+           AND ar.participant_id = $1
+           AND cs.course_id = $2
+       )`,
+    [participantId, courseId]
+  );
+}
+
+async function findOrCreateParticipant(enrollment, normalizedPhone, normalizedEmail) {
   const participantResult = await db.query(
     `SELECT *
      FROM participants
@@ -64,11 +95,11 @@ async function findOrCreateParticipant(payload, normalizedPhone, normalizedEmail
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
     [
-      payload.first_name,
-      payload.last_name,
-      payload.phone,
+      enrollment.first_name || 'Participant',
+      enrollment.last_name || 'Unknown',
       normalizedPhone,
-      payload.email,
+      normalizedPhone,
+      normalizedEmail,
       normalizedEmail
     ]
   );
@@ -99,8 +130,11 @@ async function signInAndMarkAttendance(payload) {
   const normalizedEmail = normalizeEmail(payload.email);
   const { course, session } = await validateSessionForToday(payload.course_id);
 
-  await ensureEnrollmentEligibility(course.id, normalizedPhone, normalizedEmail);
-  const participant = await findOrCreateParticipant(payload, normalizedPhone, normalizedEmail);
+  const enrollment = await ensureEnrollmentEligibility(course.id, normalizedPhone, normalizedEmail);
+  const participant = await findOrCreateParticipant(enrollment, normalizedPhone, normalizedEmail);
+
+  await ensureParticipantAssignedToCourse(participant.id, course.id);
+  await revokeParticipantCourseDevices(participant.id, course.id);
 
   const deviceUuid = randomUUID();
 
