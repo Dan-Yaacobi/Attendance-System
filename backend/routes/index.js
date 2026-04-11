@@ -4,7 +4,7 @@ const adminRoutes = require('./admin.routes');
 
 const router = express.Router();
 
-router.use('/attendance', attendanceRoutes);
-router.use('/admin', adminRoutes);
+router.use('/v1/attendance', attendanceRoutes);
+router.use('/v1/admin', adminRoutes);
 
 module.exports = router;
