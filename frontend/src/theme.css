@@ -225,3 +225,121 @@ button:disabled {
   display: inline-block;
   margin-bottom: 0.8rem;
 }
+
+.course-context-header {
+  background: #fff;
+  border: 1px solid #d8cdf5;
+  border-left: 6px solid var(--lahav-purple);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.course-context-label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.course-context-header h3 {
+  margin: 0.25rem 0;
+  font-size: 1.45rem;
+  color: var(--lahav-purple-strong);
+}
+
+.course-context-meta {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.course-context-empty {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px dashed #cab6f7;
+  border-radius: 10px;
+  background: #faf7ff;
+  color: var(--text-muted);
+}
+
+.course-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.7rem;
+}
+
+.course-selector-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.course-selector-btn.active {
+  background: var(--lahav-gold);
+  color: #2f1f52;
+}
+
+.course-selector-btn small {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.course-selector-btn.active small {
+  color: rgba(47, 31, 82, 0.85);
+}
+
+.course-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.course-card {
+  border: 1px solid #d8cdf5;
+  border-radius: 12px;
+  padding: 1rem;
+  background: #fcfaff;
+}
+
+.course-card-header h4 {
+  margin: 0 0 0.3rem;
+  font-size: 1.2rem;
+}
+
+.course-card-header p {
+  margin: 0.1rem 0;
+  color: var(--text-muted);
+}
+
+.course-sessions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.course-sessions li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #ebe3ff;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.45rem 0.6rem;
+  margin-bottom: 0.45rem;
+}
+
+.inline-session-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.danger-btn {
+  background: var(--danger);
+}
+
+.danger-btn:hover:not(:disabled) {
+  background: #8f1a12;
+}
