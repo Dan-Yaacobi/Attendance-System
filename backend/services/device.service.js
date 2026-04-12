@@ -65,7 +65,7 @@ async function insertAttendanceRecord(sessionId, participantId, deviceUuid) {
 async function markAttendanceByDevice(payload) {
   const deviceResult = await db.query(
     `SELECT pd.device_uuid, pd.participant_id, p.first_name, p.last_name
-     FROM participant_devices
+     FROM participant_devices as pd
      JOIN participants p
        ON p.id = pd.participant_id
      WHERE pd.device_uuid = $1
