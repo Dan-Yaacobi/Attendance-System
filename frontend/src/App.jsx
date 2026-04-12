@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiRequest } from './api';
 import './theme.css';
+import { formatCalendarDate } from './dateUtils';
 
 function getDeviceKey(courseId) {
   return `device_uuid_${courseId}`;
@@ -55,22 +56,6 @@ function tryFixMojibake(value) {
   } catch {
     return value;
   }
-}
-
-function formatSessionDate(rawDate) {
-  if (!rawDate) {
-    return 'לא זמין';
-  }
-
-  const parsedDate = new Date(rawDate);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return String(rawDate);
-  }
-
-  const day = String(parsedDate.getUTCDate()).padStart(2, '0');
-  const month = String(parsedDate.getUTCMonth() + 1).padStart(2, '0');
-  const year = parsedDate.getUTCFullYear();
-  return `${day}-${month}-${year}`;
 }
 
 function App() {
@@ -252,7 +237,7 @@ function App() {
   };
 
   const sessionDateRaw = session?.date || session?.session_date || session?.start_time || '';
-  const sessionDate = formatSessionDate(sessionDateRaw);
+  const sessionDate = formatCalendarDate(sessionDateRaw);
   const courseTitleRaw = course?.title || course?.name || course?.course_title || 'לא צוין';
   const courseTitle = tryFixMojibake(courseTitleRaw);
   const errorMessage = errorCode ? getFriendlyErrorMessage(errorCode) : '';
