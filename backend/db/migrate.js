@@ -1,7 +1,8 @@
+require('dotenv').config();
+
 const fs = require('fs/promises');
 const path = require('path');
 const { Pool } = require('pg');
-
 const MIGRATIONS_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS migrations (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

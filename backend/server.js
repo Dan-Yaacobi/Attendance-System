@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 4000;
 
 app.use(
   cors({
-    origin: process.env.CORS_ALLOWED_ORIGIN || '*',
+    origin: process.env.CORS_ALLOWED_ORIGIN,
     credentials: true
   })
 );

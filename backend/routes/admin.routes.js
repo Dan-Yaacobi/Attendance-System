@@ -63,7 +63,7 @@ router.post('/auth/login', async (req, res, next) => {
     );
 
     const admin = adminResult.rows[0];
-    const passwordHash = admin?.password_hash || '$2b$10$x4el0u0dXfM5T2r8j04V6.3XZ5LhQ5s6D0Q9Qx8D8Mc6w8E9L6yQm';
+    const passwordHash = admin.password_hash;
     const passwordOk = await bcrypt.compare(payload.password, passwordHash);
 
     if (!admin || !admin.is_active || !passwordOk) {
