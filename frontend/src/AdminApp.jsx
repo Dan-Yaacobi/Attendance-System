@@ -23,6 +23,48 @@ function parseCsv(text) {
   });
 }
 
+function formatCourseMonthYear(course) {
+  const monthIndex = Number(course.month) - 1;
+  const monthLabel = monthIndex >= 0 && monthIndex < 12
+    ? new Date(Date.UTC(Number(course.year), monthIndex, 1)).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })
+    : `Month ${course.month}`;
+  return `${monthLabel} ${course.year}`;
+}
+
+function CourseContextHeader({ course }) {
+  if (!course) {
+    return <div className="course-context-empty">Please select a course to continue.</div>;
+  }
+
+  return (
+    <header className="course-context-header">
+      <p className="course-context-label">Editing Course</p>
+      <h3>{course.course_title}</h3>
+      <p className="course-context-meta">{course.sap_course_id} · {formatCourseMonthYear(course)}</p>
+    </header>
+  );
+}
+
+function CourseSelector({ courses, selectedCourseId, onSelect }) {
+  return (
+    <section className="admin-panel">
+      <h3>Select Course</h3>
+      <div className="course-selector-grid">
+        {courses.map((course) => (
+          <button
+            key={course.id}
+            className={`course-selector-btn ${String(course.id) === String(selectedCourseId) ? 'active' : ''}`}
+            onClick={() => onSelect(String(course.id))}
+          >
+            <span>{course.course_title}</span>
+            <small>{course.sap_course_id} · {formatCourseMonthYear(course)}</small>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function AdminApp() {
   const [section, setSection] = useState('Dashboard');
   const [admin, setAdmin] = useState(null);
@@ -32,6 +74,7 @@ export default function AdminApp() {
   const [dashboard, setDashboard] = useState(null);
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [courseSessionsByCourseId, setCourseSessionsByCourseId] = useState({});
   const [enrollments, setEnrollments] = useState([]);
   const [attendance, setAttendance] = useState({ sessions: [], rows: [] });
   const [participants, setParticipants] = useState([]);
@@ -52,11 +95,20 @@ export default function AdminApp() {
     if (ok && data.success) setDashboard(data.data);
   };
 
+  const loadSessionsForCourse = async (courseId) => {
+    if (!courseId) return;
+    const { ok, data } = await apiRequest(`/admin/courses/${courseId}/sessions`, { credentials: 'include' });
+    if (ok && data.success) {
+      setCourseSessionsByCourseId((prev) => ({ ...prev, [courseId]: data.data }));
+    }
+  };
+
   const loadCourses = async () => {
     const { ok, data } = await apiRequest('/admin/courses', { credentials: 'include' });
     if (ok && data.success) {
       setCourses(data.data);
       if (!selectedCourseId && data.data[0]) setSelectedCourseId(String(data.data[0].id));
+      await Promise.all(data.data.map((course) => loadSessionsForCourse(course.id)));
     }
   };
 
@@ -98,6 +150,7 @@ export default function AdminApp() {
     if (!selectedCourseId || !admin) return;
     loadEnrollments(selectedCourseId);
     loadAttendance(selectedCourseId);
+    loadSessionsForCourse(selectedCourseId);
   }, [selectedCourseId, admin]);
 
   const login = async (e) => {
@@ -158,9 +211,6 @@ export default function AdminApp() {
       <main className="admin-content">
         <div className="admin-toolbar">
           <strong>{admin.full_name}</strong>
-          <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)}>
-            {courses.map((c) => <option key={c.id} value={c.id}>{c.sap_course_id} - {c.course_title}</option>)}
-          </select>
         </div>
 
         {section === 'Dashboard' && dashboard && (
@@ -173,19 +223,40 @@ export default function AdminApp() {
         )}
 
         {section === 'Courses' && (
-          <CoursesSection courses={courses} reload={loadCourses} selectedCourse={selectedCourse} reloadAttendance={() => loadAttendance(selectedCourseId)} />
-        )}
-
-        {section === 'Enrollments' && (
-          <EnrollmentsSection
-            courseId={selectedCourseId}
-            enrollments={enrollments}
-            reload={() => loadEnrollments(selectedCourseId)}
+          <CoursesSection
+            courses={courses}
+            sessionsByCourseId={courseSessionsByCourseId}
+            reloadCourses={loadCourses}
+            reloadSessions={loadSessionsForCourse}
           />
         )}
 
+        {section === 'Enrollments' && (
+          <>
+            <CourseSelector courses={courses} selectedCourseId={selectedCourseId} onSelect={setSelectedCourseId} />
+            <CourseContextHeader course={selectedCourse} />
+            {selectedCourseId ? (
+              <EnrollmentsSection
+                courseId={selectedCourseId}
+                enrollments={enrollments}
+                reload={() => loadEnrollments(selectedCourseId)}
+              />
+            ) : (
+              <section className="admin-panel"><p>Please select a course to continue.</p></section>
+            )}
+          </>
+        )}
+
         {section === 'Attendance' && (
-          <AttendanceSection courseId={selectedCourseId} attendance={attendance} reload={() => loadAttendance(selectedCourseId)} />
+          <>
+            <CourseSelector courses={courses} selectedCourseId={selectedCourseId} onSelect={setSelectedCourseId} />
+            <CourseContextHeader course={selectedCourse} />
+            {selectedCourseId ? (
+              <AttendanceSection courseId={selectedCourseId} attendance={attendance} reload={() => loadAttendance(selectedCourseId)} />
+            ) : (
+              <section className="admin-panel"><p>Please select a course to continue.</p></section>
+            )}
+          </>
         )}
 
         {section === 'Participants' && (
@@ -200,9 +271,9 @@ export default function AdminApp() {
   );
 }
 
-function CoursesSection({ courses, reload, selectedCourse, reloadAttendance }) {
+function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSessions }) {
   const [form, setForm] = useState({ sap_course_id: '', course_title: '', month: '', year: '' });
-  const [sessionForm, setSessionForm] = useState({ session_date: '', start_time: '', end_time: '' });
+  const [newSessionByCourse, setNewSessionByCourse] = useState({});
 
   const saveCourse = async (e) => {
     e.preventDefault();
@@ -213,20 +284,30 @@ function CoursesSection({ courses, reload, selectedCourse, reloadAttendance }) {
       body: JSON.stringify({ ...form, month: Number(form.month), year: Number(form.year) })
     });
     setForm({ sap_course_id: '', course_title: '', month: '', year: '' });
-    reload();
+    reloadCourses();
   };
 
-  const addSession = async (e) => {
+  const addSession = async (e, courseId) => {
     e.preventDefault();
-    if (!selectedCourse) return;
-    await apiRequest(`/admin/courses/${selectedCourse.id}/sessions`, {
+    const session_date = newSessionByCourse[courseId];
+    if (!session_date) return;
+
+    await apiRequest(`/admin/courses/${courseId}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(sessionForm)
+      body: JSON.stringify({ session_date })
     });
-    setSessionForm({ session_date: '', start_time: '', end_time: '' });
-    reloadAttendance();
+
+    setNewSessionByCourse((prev) => ({ ...prev, [courseId]: '' }));
+    reloadSessions(courseId);
+    reloadCourses();
+  };
+
+  const deleteSession = async (sessionId, courseId) => {
+    await apiRequest(`/admin/sessions/${sessionId}`, { method: 'DELETE', credentials: 'include' });
+    reloadSessions(courseId);
+    reloadCourses();
   };
 
   return <section className="admin-panel"><h3>Courses</h3>
@@ -237,15 +318,44 @@ function CoursesSection({ courses, reload, selectedCourse, reloadAttendance }) {
       <input placeholder="Year" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} />
       <button type="submit">Create Course</button>
     </form>
-    <table className="admin-table"><thead><tr><th>SAP ID</th><th>Title</th><th>Month/Year</th><th>Sessions</th></tr></thead>
-      <tbody>{courses.map((c) => <tr key={c.id}><td>{c.sap_course_id}</td><td>{c.course_title}</td><td>{c.month}/{c.year}</td><td>{c.session_count}</td></tr>)}</tbody></table>
-    <h4>Add Session (selected course)</h4>
-    <form onSubmit={addSession} className="admin-grid-form">
-      <input type="date" value={sessionForm.session_date} onChange={(e) => setSessionForm({ ...sessionForm, session_date: e.target.value })} />
-      <input type="time" value={sessionForm.start_time} onChange={(e) => setSessionForm({ ...sessionForm, start_time: e.target.value })} />
-      <input type="time" value={sessionForm.end_time} onChange={(e) => setSessionForm({ ...sessionForm, end_time: e.target.value })} />
-      <button type="submit">Add Session</button>
-    </form>
+
+    <div className="course-card-list">
+      {courses.map((course) => {
+        const sessions = sessionsByCourseId[course.id] || [];
+        return (
+          <article key={course.id} className="course-card">
+            <header className="course-card-header">
+              <h4>{course.course_title}</h4>
+              <p>{course.sap_course_id}</p>
+              <p>{formatCourseMonthYear(course)}</p>
+            </header>
+
+            <section className="course-sessions">
+              <h5>Sessions</h5>
+              {sessions.length === 0 ? <p>No sessions yet.</p> : (
+                <ul>
+                  {sessions.map((session) => (
+                    <li key={session.id}>
+                      <span>{String(session.session_date).slice(0, 10)}</span>
+                      <button onClick={() => deleteSession(session.id, course.id)} className="danger-btn">Delete</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <form className="inline-session-form" onSubmit={(e) => addSession(e, course.id)}>
+              <input
+                type="date"
+                value={newSessionByCourse[course.id] || ''}
+                onChange={(e) => setNewSessionByCourse((prev) => ({ ...prev, [course.id]: e.target.value }))}
+              />
+              <button type="submit">Add Session</button>
+            </form>
+          </article>
+        );
+      })}
+    </div>
   </section>;
 }
 
@@ -293,7 +403,7 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
       <button type="submit">Add Enrollment</button>
     </form>
     <table className="admin-table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th /></tr></thead><tbody>
-      {enrollments.map((e) => <tr key={e.id}><td>{e.first_name} {e.last_name}</td><td>{e.phone}</td><td>{e.email}</td><td><button onClick={() => removeEnrollment(e.id)}>Delete</button></td></tr>)}
+      {enrollments.map((enrollment) => <tr key={enrollment.id}><td>{enrollment.first_name} {enrollment.last_name}</td><td>{enrollment.phone}</td><td>{enrollment.email}</td><td><button onClick={() => removeEnrollment(enrollment.id)}>Delete</button></td></tr>)}
     </tbody></table>
   </section>;
 }
@@ -310,19 +420,19 @@ function AttendanceSection({ courseId, attendance, reload }) {
   };
 
   const grouped = {};
-  for (const r of attendance.rows) {
-    if (!grouped[r.participant_id]) grouped[r.participant_id] = { person: r, sessions: {} };
-    grouped[r.participant_id].sessions[r.session_id] = r;
+  for (const row of attendance.rows) {
+    if (!grouped[row.participant_id]) grouped[row.participant_id] = { person: row, sessions: {} };
+    grouped[row.participant_id].sessions[row.session_id] = row;
   }
 
   return <section className="admin-panel"><h3>Attendance</h3>
     <a href={`${API_BASE_URL}/admin/courses/${courseId}/attendance/export`} target="_blank" rel="noreferrer">Export CSV</a>
-    <table className="admin-table"><thead><tr><th>Participant</th>{attendance.sessions.map((s) => <th key={s.id}>{String(s.session_date).slice(0, 10)}</th>)}</tr></thead><tbody>
+    <table className="admin-table"><thead><tr><th>Participant</th>{attendance.sessions.map((session) => <th key={session.id}>{String(session.session_date).slice(0, 10)}</th>)}</tr></thead><tbody>
       {Object.values(grouped).map((row) => <tr key={row.person.participant_id}><td>{row.person.first_name} {row.person.last_name}</td>
-        {attendance.sessions.map((s) => {
-          const cell = row.sessions[s.id];
+        {attendance.sessions.map((session) => {
+          const cell = row.sessions[session.id];
           const present = cell && !cell.removed_at;
-          return <td key={s.id}><button onClick={() => toggle(row.person.participant_id, s.id, present)}>{present ? 'Present' : 'Absent'} {cell?.source === 'admin_manual' ? '*' : ''}</button></td>;
+          return <td key={session.id}><button onClick={() => toggle(row.person.participant_id, session.id, present)}>{present ? 'Present' : 'Absent'} {cell?.source === 'admin_manual' ? '*' : ''}</button></td>;
         })}
       </tr>)}
     </tbody></table>
@@ -333,7 +443,7 @@ function ParticipantsSection({ participants, onSearch }) {
   return <section className="admin-panel"><h3>Participants</h3>
     <input placeholder="Search by name/email/phone" onChange={(e) => onSearch(e.target.value)} />
     <table className="admin-table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th></tr></thead><tbody>
-      {participants.map((p) => <tr key={p.id}><td>{p.first_name} {p.last_name}</td><td>{p.phone}</td><td>{p.email}</td></tr>)}
+      {participants.map((participant) => <tr key={participant.id}><td>{participant.first_name} {participant.last_name}</td><td>{participant.phone}</td><td>{participant.email}</td></tr>)}
     </tbody></table>
   </section>;
 }
@@ -341,7 +451,7 @@ function ParticipantsSection({ participants, onSearch }) {
 function LogsSection({ logs, reload }) {
   return <section className="admin-panel"><h3>Logs</h3><button onClick={reload}>Refresh</button>
     <table className="admin-table"><thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Entity</th></tr></thead><tbody>
-      {logs.map((l) => <tr key={l.id}><td>{new Date(l.created_at).toLocaleString()}</td><td>{l.admin_email || 'N/A'}</td><td>{l.action_type}</td><td>{l.entity_type}</td></tr>)}
+      {logs.map((log) => <tr key={log.id}><td>{new Date(log.created_at).toLocaleString()}</td><td>{log.admin_email || 'N/A'}</td><td>{log.action_type}</td><td>{log.entity_type}</td></tr>)}
     </tbody></table>
   </section>;
 }

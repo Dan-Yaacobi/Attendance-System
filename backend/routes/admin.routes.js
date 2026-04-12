@@ -172,6 +172,17 @@ router.put('/courses/:courseId', requireAdminAuth, async (req, res, next) => {
   }
 });
 
+
+router.get('/courses/:courseId/sessions', requireAdminAuth, async (req, res, next) => {
+  try {
+    const courseId = Number(req.params.courseId);
+    const result = await db.query('SELECT * FROM course_sessions WHERE course_id = $1 ORDER BY session_date ASC', [courseId]);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/courses/:courseId/sessions', requireAdminAuth, async (req, res, next) => {
   try {
     const courseId = Number(req.params.courseId);
@@ -205,6 +216,28 @@ router.put('/sessions/:sessionId', requireAdminAuth, async (req, res, next) => {
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     next(error);
+  }
+});
+
+
+router.delete('/sessions/:sessionId', requireAdminAuth, async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const sessionId = Number(req.params.sessionId);
+    const before = await client.query('SELECT * FROM course_sessions WHERE id = $1', [sessionId]);
+
+    await client.query('BEGIN');
+    await client.query('DELETE FROM attendance_records WHERE session_id = $1', [sessionId]);
+    await client.query('DELETE FROM course_sessions WHERE id = $1', [sessionId]);
+    await client.query('COMMIT');
+
+    await logAdminAction({ adminId: req.admin.id, actionType: 'session_delete', entityType: 'session', entityId: sessionId, oldValues: before.rows[0] || null });
+    res.json({ success: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
   }
 });
 
