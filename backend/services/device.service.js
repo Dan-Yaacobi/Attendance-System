@@ -64,10 +64,12 @@ async function insertAttendanceRecord(sessionId, participantId, deviceUuid) {
 
 async function markAttendanceByDevice(payload) {
   const deviceResult = await db.query(
-    `SELECT device_uuid, participant_id
+    `SELECT pd.device_uuid, pd.participant_id, p.first_name, p.last_name
      FROM participant_devices
-     WHERE device_uuid = $1
-       AND is_revoked = FALSE`,
+     JOIN participants p
+       ON p.id = pd.participant_id
+     WHERE pd.device_uuid = $1
+       AND pd.is_revoked = FALSE`,
     [payload.device_uuid]
   );
 
@@ -89,6 +91,11 @@ async function markAttendanceByDevice(payload) {
 
   return {
     participant_id: device.participant_id,
+    participant: {
+      id: device.participant_id,
+      first_name: device.first_name,
+      last_name: device.last_name
+    },
     session_id: session.id,
     already_marked: attendanceResult.already_marked,
     ...(attendanceResult.code ? { code: attendanceResult.code } : {})

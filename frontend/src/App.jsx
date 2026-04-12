@@ -19,18 +19,18 @@ function clearStoredDeviceUuid(courseId) {
 }
 
 const FRIENDLY_ERROR_MESSAGES = {
-  INVALID_QR: 'The QR code is missing course information. Please scan a valid course QR code.',
-  COURSE_NOT_FOUND: 'We could not find this course. Please verify you scanned the correct QR code.',
-  NO_SESSION_TODAY: 'There is no active session for this course today.',
-  INVALID_DEVICE_UUID: 'This device is no longer recognized for this course. Please sign in again.',
-  NOT_ALLOWED: 'Your details are not eligible for this course. Please check your phone/email or contact support.',
+  INVALID_QR: 'קוד ה-QR לא כולל פרטי קורס. נא לסרוק קוד תקין של הקורס.',
+  COURSE_NOT_FOUND: 'לא הצלחנו למצוא את הקורס הזה. נא לוודא שסרקת את הקוד הנכון.',
+  NO_SESSION_TODAY: 'אין מפגש פעיל לקורס זה היום.',
+  INVALID_DEVICE_UUID: 'המכשיר הזה כבר לא מזוהה עבור הקורס. נא להתחבר מחדש.',
+  NOT_ALLOWED: 'הפרטים שהוזנו אינם מתאימים לקורס זה. נא לבדוק טלפון/אימייל או לפנות לתמיכה.',
   NOT_ASSIGNED_TO_COURSE:
-    'You are not assigned to this course yet. Please contact your course coordinator.',
-  VALIDATION_ERROR: 'Some details are missing or invalid. Please review your inputs and try again.',
-  SIGN_IN_FAILED: 'Could not complete sign-in right now. Please try again in a moment.',
-  MARK_BY_DEVICE_FAILED: 'Could not verify this device right now. Please try signing in again.',
-  DEVICE_UUID_MISSING: 'Sign-in succeeded, but the device verification token was missing. Please try again.',
-  UNKNOWN_ERROR: 'Something unexpected happened. Please try again.',
+    'עדיין לא שובצת לקורס זה. נא לפנות לרכז/ת הקורס.',
+  VALIDATION_ERROR: 'חלק מהפרטים חסרים או לא תקינים. נא לבדוק את הנתונים ולנסות שוב.',
+  SIGN_IN_FAILED: 'לא הצלחנו להשלים התחברות כרגע. נא לנסות שוב בעוד רגע.',
+  MARK_BY_DEVICE_FAILED: 'לא הצלחנו לאמת את המכשיר כרגע. נא לנסות להתחבר מחדש.',
+  DEVICE_UUID_MISSING: 'ההתחברות הצליחה, אך חסר מזהה מכשיר לאימות. נא לנסות שוב.',
+  UNKNOWN_ERROR: 'אירעה תקלה לא צפויה. נא לנסות שוב.',
 };
 
 function getFriendlyErrorMessage(code) {
@@ -38,7 +38,7 @@ function getFriendlyErrorMessage(code) {
     return FRIENDLY_ERROR_MESSAGES.UNKNOWN_ERROR;
   }
 
-  return FRIENDLY_ERROR_MESSAGES[code] || 'An unexpected error occurred. Please try again or contact support.';
+  return FRIENDLY_ERROR_MESSAGES[code] || 'אירעה שגיאה לא צפויה. נא לנסות שוב או לפנות לתמיכה.';
 }
 
 function tryFixMojibake(value) {
@@ -59,7 +59,7 @@ function tryFixMojibake(value) {
 
 function formatSessionDate(rawDate) {
   if (!rawDate) {
-    return 'N/A';
+    return 'לא זמין';
   }
 
   const parsedDate = new Date(rawDate);
@@ -91,6 +91,7 @@ function App() {
     email: '',
   });
   const [alreadyMarked, setAlreadyMarked] = useState(false);
+  const [participantFirstName, setParticipantFirstName] = useState('');
 
   useEffect(() => {
     let isMounted = true;
@@ -128,6 +129,10 @@ function App() {
         setSession(data?.data?.session || null);
 
         const storedDeviceUuid = getStoredDeviceUuid(courseId);
+        const storedFirstName = localStorage.getItem(`participant_first_name_${courseId}`) || '';
+        if (storedFirstName) {
+          setIfMounted(setParticipantFirstName, storedFirstName);
+        }
         if (!storedDeviceUuid) {
           setIfMounted(setNeedsSignIn, true);
           return;
@@ -160,6 +165,10 @@ function App() {
         const markData = markResponse.data?.data;
         if (markData?.already_marked) {
           setIfMounted(setAlreadyMarked, true);
+        }
+        if (markData?.participant?.first_name) {
+          setIfMounted(setParticipantFirstName, markData.participant.first_name);
+          localStorage.setItem(`participant_first_name_${courseId}`, markData.participant.first_name);
         }
 
         setIfMounted(setSuccess, true);
@@ -228,6 +237,11 @@ function App() {
       setStoredDeviceUuid(courseId, signInData.device_uuid);
       setDeviceUuid(signInData.device_uuid);
       setAlreadyMarked(Boolean(signInData.already_marked));
+      const firstName = signInData?.participant?.first_name || '';
+      setParticipantFirstName(firstName);
+      if (firstName) {
+        localStorage.setItem(`participant_first_name_${courseId}`, firstName);
+      }
       setSuccess(true);
       setNeedsSignIn(false);
     } catch (err) {
@@ -239,54 +253,55 @@ function App() {
 
   const sessionDateRaw = session?.date || session?.session_date || session?.start_time || '';
   const sessionDate = formatSessionDate(sessionDateRaw);
-  const courseTitleRaw = course?.title || course?.name || course?.course_title || 'Course';
+  const courseTitleRaw = course?.title || course?.name || course?.course_title || 'לא צוין';
   const courseTitle = tryFixMojibake(courseTitleRaw);
   const errorMessage = errorCode ? getFriendlyErrorMessage(errorCode) : '';
+  const firstNameForMessage = participantFirstName || 'משתתף/ת';
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" dir="rtl">
       <section className="attendance-card">
         <header className="card-header">
-          <h1>Attendance Check-In</h1>
-          <p className="subtitle">Secure QR attendance for today&apos;s session.</p>
+          <h1>רישום נוכחות</h1>
+          <p className="subtitle">קורס: {courseTitle}</p>
         </header>
 
-        {loading && <p className="status-line">Loading your session details…</p>}
+        {loading && <p className="status-line">טוענים את פרטי המפגש…</p>}
 
         {!loading && errorMessage && (
           <div className="alert alert-error" role="alert" aria-live="polite">
-            <h2>We couldn&apos;t complete your check-in</h2>
+            <h2>לא הצלחנו להשלים את רישום הנוכחות</h2>
             <p>{errorMessage}</p>
-            <p className="error-code">Reference: {errorCode}</p>
+            <p className="error-code">קוד שגיאה: {errorCode}</p>
           </div>
         )}
 
         {!loading && success && (
           <section className="alert alert-success">
-            <h2>{alreadyMarked ? 'Attendance Already Recorded' : 'Attendance Confirmed'}</h2>
+            <h2>{alreadyMarked ? `כבר נרשמת היום, ${firstNameForMessage}` : `נרשמת בהצלחה, ${firstNameForMessage}`}</h2>
             <p>
-              <strong>Course:</strong> {courseTitle}
+              <strong>קורס:</strong> {courseTitle}
             </p>
             <p>
-              <strong>Session Date:</strong> {sessionDate}
+              <strong>תאריך מפגש:</strong> {sessionDate}
             </p>
             <p>
               {alreadyMarked
-                ? 'You already checked in for this session. No additional action is needed.'
-                : 'Your attendance has been successfully recorded. Have a great session.'}
+                ? `${firstNameForMessage}, כבר נרשמת לנוכחות במפגש של היום ואין צורך בפעולה נוספת.`
+                : `${firstNameForMessage}, הנוכחות שלך נרשמה בהצלחה. שיהיה מפגש מוצלח!`}
             </p>
-            {deviceUuid && <p className="hint">This device is recognized for your next scan.</p>}
+            {deviceUuid && <p className="hint">המכשיר הזה יזוהה אוטומטית בסריקה הבאה שלך.</p>}
           </section>
         )}
 
         {!loading && !success && needsSignIn && (
           <section>
-            <h2>Confirm your details</h2>
-            <p className="subtitle">Enter your phone and email to verify your enrollment and record attendance.</p>
+            <h2>אימות פרטים לרישום נוכחות</h2>
+            <p className="subtitle">יש להזין טלפון ואימייל כדי לאמת הרשמה לקורס ולסמן נוכחות.</p>
 
             <form onSubmit={handleSignIn} className="sign-in-form">
               <div>
-                <label htmlFor="phone">Phone</label>
+                <label htmlFor="phone">טלפון</label>
                 <input
                   id="phone"
                   name="phone"
@@ -294,12 +309,12 @@ function App() {
                   onChange={handleInputChange}
                   required
                   autoComplete="tel"
-                  placeholder="e.g. 0501234567"
+                  placeholder="לדוגמה: 0501234567"
                 />
               </div>
 
               <div>
-                <label htmlFor="email">Email</label>
+                <label htmlFor="email">אימייל</label>
                 <input
                   id="email"
                   name="email"
@@ -313,14 +328,14 @@ function App() {
               </div>
 
               <button type="submit" disabled={loading}>
-                Verify & Mark Attendance
+                אימות ורישום נוכחות
               </button>
             </form>
           </section>
         )}
 
         {!loading && !success && !needsSignIn && !errorMessage && (
-          <p className="status-line">Preparing attendance flow…</p>
+          <p className="status-line">מכינים את תהליך הרישום לנוכחות…</p>
         )}
       </section>
     </main>
