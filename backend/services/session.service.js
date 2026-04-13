@@ -22,7 +22,7 @@ async function validateSessionForToday(sapCourseId) {
   }
 
   const sessionResult = await db.query(
-    `SELECT id, session_date, start_time, end_time
+    `SELECT id, session_date::text AS session_date, start_time, end_time
      FROM course_sessions
      WHERE course_id = $1
        AND session_date = CURRENT_DATE

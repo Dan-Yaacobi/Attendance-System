@@ -176,7 +176,13 @@ router.put('/courses/:courseId', requireAdminAuth, async (req, res, next) => {
 router.get('/courses/:courseId/sessions', requireAdminAuth, async (req, res, next) => {
   try {
     const courseId = Number(req.params.courseId);
-    const result = await db.query('SELECT * FROM course_sessions WHERE course_id = $1 ORDER BY session_date ASC', [courseId]);
+    const result = await db.query(
+      `SELECT id, course_id, session_date::text AS session_date, start_time, end_time, is_cancelled, created_at, updated_at
+       FROM course_sessions
+       WHERE course_id = $1
+       ORDER BY session_date ASC`,
+      [courseId]
+    );
     res.json({ success: true, data: result.rows });
   } catch (error) {
     next(error);
@@ -190,7 +196,7 @@ router.post('/courses/:courseId/sessions', requireAdminAuth, async (req, res, ne
     const result = await db.query(
       `INSERT INTO course_sessions (course_id, session_date, start_time, end_time)
        VALUES ($1, $2, $3, $4)
-       RETURNING *`,
+       RETURNING id, course_id, session_date::text AS session_date, start_time, end_time, is_cancelled, created_at, updated_at`,
       [courseId, payload.session_date, payload.start_time, payload.end_time]
     );
     await logAdminAction({ adminId: req.admin.id, actionType: 'session_create', entityType: 'session', entityId: result.rows[0].id, newValues: result.rows[0] });
@@ -209,7 +215,7 @@ router.put('/sessions/:sessionId', requireAdminAuth, async (req, res, next) => {
       `UPDATE course_sessions
        SET session_date = $1, start_time = $2, end_time = $3, updated_at = NOW()
        WHERE id = $4
-       RETURNING *`,
+       RETURNING id, course_id, session_date::text AS session_date, start_time, end_time, is_cancelled, created_at, updated_at`,
       [payload.session_date, payload.start_time, payload.end_time, sessionId]
     );
     await logAdminAction({ adminId: req.admin.id, actionType: 'session_update', entityType: 'session', entityId: sessionId, oldValues: before.rows[0], newValues: result.rows[0] });
@@ -324,10 +330,16 @@ router.put('/courses/:courseId/enrollments/replace', requireAdminAuth, async (re
 router.get('/courses/:courseId/attendance', requireAdminAuth, async (req, res, next) => {
   try {
     const courseId = Number(req.params.courseId);
-    const sessions = await db.query('SELECT * FROM course_sessions WHERE course_id = $1 ORDER BY session_date ASC', [courseId]);
+    const sessions = await db.query(
+      `SELECT id, course_id, session_date::text AS session_date, start_time, end_time, is_cancelled, created_at, updated_at
+       FROM course_sessions
+       WHERE course_id = $1
+       ORDER BY session_date ASC`,
+      [courseId]
+    );
     const matrix = await db.query(
       `SELECT p.id AS participant_id, p.first_name, p.last_name, p.phone, p.email,
-          s.id AS session_id, s.session_date, ar.id AS attendance_id, ar.source, ar.removed_at
+          s.id AS session_id, s.session_date::text AS session_date, ar.id AS attendance_id, ar.source, ar.removed_at
        FROM course_participants cp
        JOIN participants p ON p.id = cp.participant_id
        CROSS JOIN LATERAL (
@@ -446,7 +458,13 @@ router.get('/logs', requireAdminAuth, async (req, res, next) => {
 router.get('/courses/:courseId/attendance/export', requireAdminAuth, async (req, res, next) => {
   try {
     const courseId = Number(req.params.courseId);
-    const sessionsResult = await db.query('SELECT id, session_date FROM course_sessions WHERE course_id = $1 ORDER BY session_date', [courseId]);
+    const sessionsResult = await db.query(
+      `SELECT id, session_date::text AS session_date
+       FROM course_sessions
+       WHERE course_id = $1
+       ORDER BY session_date`,
+      [courseId]
+    );
     const participantsResult = await db.query(
       `SELECT p.id, p.first_name, p.last_name, p.phone, p.email
        FROM course_participants cp JOIN participants p ON p.id = cp.participant_id
@@ -464,7 +482,7 @@ router.get('/courses/:courseId/attendance/export', requireAdminAuth, async (req,
     );
 
     const attendanceMap = new Map(attendanceResult.rows.map((row) => [`${row.participant_id}:${row.session_id}`, !row.removed_at]));
-    const headers = ['Name', 'Phone', 'Email', ...sessionsResult.rows.map((s) => s.session_date.toISOString().slice(0, 10))];
+    const headers = ['Name', 'Phone', 'Email', ...sessionsResult.rows.map((s) => s.session_date)];
     const lines = [headers.join(',')];
 
     for (const p of participantsResult.rows) {
