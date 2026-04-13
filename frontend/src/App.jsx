@@ -96,7 +96,6 @@ function App() {
         });
 
         if (!markResponse.ok || !markResponse.data?.success)  {
-          clearStoredDeviceUuid(courseId);
           setIfMounted(setDeviceUuid, '');
           setIfMounted(setNeedsSignIn, true);
           return;
