@@ -4,22 +4,156 @@ import './theme.css';
 
 const navItems = ['Dashboard', 'Courses', 'Enrollments', 'Attendance', 'Participants', 'Logs'];
 
-function parseCsv(text) {
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-  return lines.slice(1).map((line) => {
-    const cells = line.split(',').map((c) => c.trim());
-    const row = {};
-    headers.forEach((h, i) => {
-      row[h] = cells[i] || '';
+function normalizeEnrollmentRow(row) {
+  return {
+    first_name: (row.first_name || row.firstname || '').toString().trim(),
+    last_name: (row.last_name || row.lastname || '').toString().trim(),
+    phone: (row.phone || '').toString().trim(),
+    email: (row.email || '').toString().trim()
+  };
+}
+
+async function parseEnrollmentWorkbook(file) {
+  const buffer = await file.arrayBuffer();
+  const zipEntries = await readZipEntries(buffer);
+  const sheetXml = await getFirstWorksheetXml(zipEntries);
+  if (!sheetXml) return [];
+
+  const sharedStrings = parseSharedStrings(zipEntries.get('xl/sharedStrings.xml'));
+  const rowObjects = parseWorksheetRows(sheetXml, sharedStrings);
+  return rowObjects.map(normalizeEnrollmentRow);
+}
+
+function readUInt16(view, offset) {
+  return view.getUint16(offset, true);
+}
+
+function readUInt32(view, offset) {
+  return view.getUint32(offset, true);
+}
+
+async function inflateDeflateRaw(data) {
+  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const arrayBuffer = await new Response(stream).arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
+async function readZipEntries(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const bytes = new Uint8Array(arrayBuffer);
+
+  let eocdOffset = -1;
+  for (let i = bytes.length - 22; i >= 0; i -= 1) {
+    if (readUInt32(view, i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) throw new Error('Invalid .xlsx file (missing ZIP directory).');
+
+  const centralDirectoryOffset = readUInt32(view, eocdOffset + 16);
+  const totalEntries = readUInt16(view, eocdOffset + 10);
+  const entries = new Map();
+
+  let ptr = centralDirectoryOffset;
+  for (let i = 0; i < totalEntries; i += 1) {
+    if (readUInt32(view, ptr) !== 0x02014b50) throw new Error('Invalid .xlsx file (bad ZIP header).');
+
+    const compressionMethod = readUInt16(view, ptr + 10);
+    const compressedSize = readUInt32(view, ptr + 20);
+    const fileNameLength = readUInt16(view, ptr + 28);
+    const extraLength = readUInt16(view, ptr + 30);
+    const commentLength = readUInt16(view, ptr + 32);
+    const localHeaderOffset = readUInt32(view, ptr + 42);
+
+    const fileNameBytes = bytes.slice(ptr + 46, ptr + 46 + fileNameLength);
+    const fileName = new TextDecoder().decode(fileNameBytes);
+
+    if (readUInt32(view, localHeaderOffset) !== 0x04034b50) throw new Error('Invalid .xlsx file (bad local file header).');
+    const localNameLen = readUInt16(view, localHeaderOffset + 26);
+    const localExtraLen = readUInt16(view, localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    const compressedData = bytes.slice(dataStart, dataStart + compressedSize);
+
+    let fileData;
+    if (compressionMethod === 0) {
+      fileData = compressedData;
+    } else if (compressionMethod === 8) {
+      fileData = await inflateDeflateRaw(compressedData);
+    } else {
+      throw new Error(`Unsupported ZIP compression method: ${compressionMethod}.`);
+    }
+
+    entries.set(fileName, new TextDecoder().decode(fileData));
+    ptr += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+async function getFirstWorksheetXml(zipEntries) {
+  const worksheetPaths = Array.from(zipEntries.keys())
+    .filter((path) => path.startsWith('xl/worksheets/sheet') && path.endsWith('.xml'))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const firstPath = worksheetPaths[0];
+  return firstPath ? zipEntries.get(firstPath) : '';
+}
+
+function parseSharedStrings(sharedStringsXml = '') {
+  if (!sharedStringsXml) return [];
+  const doc = new DOMParser().parseFromString(sharedStringsXml, 'application/xml');
+  const items = Array.from(doc.getElementsByTagName('si'));
+
+  return items.map((item) => {
+    const textNodes = Array.from(item.getElementsByTagName('t'));
+    return textNodes.map((node) => node.textContent || '').join('');
+  });
+}
+
+function columnLettersToIndex(letters) {
+  let value = 0;
+  for (const char of letters) {
+    value = (value * 26) + (char.charCodeAt(0) - 64);
+  }
+  return value - 1;
+}
+
+function parseWorksheetRows(worksheetXml, sharedStrings) {
+  const doc = new DOMParser().parseFromString(worksheetXml, 'application/xml');
+  const rowNodes = Array.from(doc.getElementsByTagName('row'));
+  if (rowNodes.length < 2) return [];
+
+  const table = rowNodes.map((rowNode) => {
+    const cells = Array.from(rowNode.getElementsByTagName('c'));
+    const row = [];
+
+    cells.forEach((cellNode) => {
+      const ref = cellNode.getAttribute('r') || '';
+      const letters = (ref.match(/[A-Z]+/) || [''])[0];
+      const colIndex = letters ? columnLettersToIndex(letters) : row.length;
+      const type = cellNode.getAttribute('t');
+
+      let value = '';
+      if (type === 'inlineStr') {
+        value = cellNode.getElementsByTagName('t')[0]?.textContent || '';
+      } else {
+        const raw = cellNode.getElementsByTagName('v')[0]?.textContent || '';
+        value = type === 's' ? (sharedStrings[Number(raw)] || '') : raw;
+      }
+      row[colIndex] = value;
     });
-    return {
-      first_name: row.first_name || row.firstname || '',
-      last_name: row.last_name || row.lastname || '',
-      phone: row.phone || '',
-      email: row.email || ''
-    };
+
+    return row;
+  });
+
+  const headers = (table[0] || []).map((header) => String(header || '').trim().toLowerCase());
+  return table.slice(1).map((row) => {
+    const obj = {};
+    headers.forEach((header, idx) => {
+      obj[header] = row[idx] || '';
+    });
+    return obj;
   });
 }
 
@@ -404,6 +538,10 @@ function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSess
 
 function EnrollmentsSection({ courseId, enrollments, reload }) {
   const [row, setRow] = useState({ first_name: '', last_name: '', phone: '', email: '' });
+  const [selectedWorkbook, setSelectedWorkbook] = useState(null);
+  const [parsedRows, setParsedRows] = useState([]);
+  const [browseStatus, setBrowseStatus] = useState('');
+  const [uploadStatus, setUploadStatus] = useState('');
 
   const addRow = async (e) => {
     e.preventDefault();
@@ -417,18 +555,63 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
     reload();
   };
 
-  const replaceByCsv = async (e) => {
+  const browseWorkbook = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const rows = parseCsv(text);
-    await apiRequest(`/admin/courses/${courseId}/enrollments/replace`, {
+
+    setUploadStatus('');
+    setSelectedWorkbook(null);
+    setParsedRows([]);
+
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      setBrowseStatus('Browse failed: only .xlsx files are supported.');
+      return;
+    }
+
+    try {
+      const rows = await parseEnrollmentWorkbook(file);
+      if (!rows.length) {
+        setBrowseStatus('Browse failed: the workbook has no enrollment rows.');
+        return;
+      }
+
+      setSelectedWorkbook(file);
+      setParsedRows(rows);
+      setBrowseStatus(`Browse successful: ready to upload ${rows.length} row(s).`);
+    } catch (error) {
+      setBrowseStatus(`Browse failed: ${error.message}`);
+    }
+  };
+
+  const uploadWorkbook = async () => {
+    if (!selectedWorkbook || parsedRows.length === 0) {
+      setUploadStatus('Upload failed: browse and parse a .xlsx file first.');
+      return;
+    }
+
+    const { ok, data } = await apiRequest(`/admin/courses/${courseId}/enrollments/replace`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ rows })
+      body: JSON.stringify({ rows: parsedRows })
     });
+
+    if (!ok || !data?.success) {
+      setUploadStatus(`Upload failed: ${data?.error?.message || 'unknown error'}`);
+      return;
+    }
+
+    setUploadStatus(`Upload successful: replaced ${data.data?.replaced_count || 0} enrollment(s).`);
+    setSelectedWorkbook(null);
+    setParsedRows([]);
     reload();
+  };
+
+  const clearSelectedWorkbook = () => {
+    setSelectedWorkbook(null);
+    setParsedRows([]);
+    setBrowseStatus('');
+    setUploadStatus('');
   };
 
   const removeEnrollment = async (id) => {
@@ -437,7 +620,15 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
   };
 
   return <section className="admin-panel"><h3>Enrollments</h3>
-    <label className="file-upload">CSV Upload (replace all): <input type="file" accept=".csv" onChange={replaceByCsv} /></label>
+    <label className="file-upload">Excel Upload (.xlsx):
+      <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={browseWorkbook} />
+    </label>
+    {browseStatus && <p>{browseStatus}</p>}
+    <div className="inline-actions">
+      <button type="button" onClick={uploadWorkbook}>Upload</button>
+      <button type="button" onClick={clearSelectedWorkbook}>Clear</button>
+    </div>
+    {uploadStatus && <p>{uploadStatus}</p>}
     <form onSubmit={addRow} className="admin-grid-form">
       <input placeholder="First Name" value={row.first_name} onChange={(e) => setRow({ ...row, first_name: e.target.value })} />
       <input placeholder="Last Name" value={row.last_name} onChange={(e) => setRow({ ...row, last_name: e.target.value })} />
