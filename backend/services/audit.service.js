@@ -1,10 +1,15 @@
 const db = require('../db');
 
+function serializeJson(value) {
+  if (value === null || value === undefined) return null;
+  return JSON.stringify(value);
+}
+
 async function logAdminAction({ adminId = null, actionType, entityType, entityId = null, oldValues = null, newValues = null }) {
   await db.query(
     `INSERT INTO admin_audit_logs (admin_id, action_type, entity_type, entity_id, old_values, new_values)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    [adminId, actionType, entityType, entityId, oldValues, newValues]
+    [adminId, actionType, entityType, entityId, serializeJson(oldValues), serializeJson(newValues)]
   );
 }
 
