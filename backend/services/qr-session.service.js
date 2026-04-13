@@ -45,9 +45,14 @@ async function createQrSession({ courseId, adminId }) {
 
 async function getValidQrSession(sessionId) {
   const result = await db.query(
-    `SELECT qs.session_id, qs.course_id, qs.expires_at, c.sap_course_id
+    `SELECT qs.session_id, qs.course_id, qs.expires_at, c.sap_course_id, c.course_title,
+            cs_today.session_date::text AS session_date
      FROM qr_sessions qs
      JOIN courses c ON c.id = qs.course_id
+     LEFT JOIN course_sessions cs_today
+       ON cs_today.course_id = c.id
+      AND cs_today.session_date = CURRENT_DATE
+      AND cs_today.is_cancelled = FALSE
      WHERE qs.session_id = $1
      LIMIT 1`,
     [sessionId]
@@ -103,6 +108,8 @@ async function getQrDisplayPayload(sessionId) {
   return {
     session_id: session.session_id,
     course_id: session.sap_course_id,
+    course_title: session.course_title,
+    session_date: session.session_date,
     token: tokenRow.token,
     token_expires_at: tokenRow.expires_at,
     session_expires_at: session.expires_at

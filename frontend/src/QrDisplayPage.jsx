@@ -11,6 +11,15 @@ function toQrImageUrl(value) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(value)}`;
 }
 
+function formatDisplayDate(value) {
+  const parsedDate = value ? new Date(value) : new Date();
+  if (Number.isNaN(parsedDate.getTime())) {
+    return new Date().toLocaleDateString('he-IL');
+  }
+
+  return parsedDate.toLocaleDateString('he-IL');
+}
+
 export default function QrDisplayPage() {
   const sessionId = useMemo(() => getSessionIdFromPath(), []);
   const [loading, setLoading] = useState(true);
@@ -60,30 +69,17 @@ export default function QrDisplayPage() {
   const signInUrl = payload
     ? `${window.location.origin}/?course_id=${encodeURIComponent(payload.course_id)}&token=${encodeURIComponent(payload.token)}`
     : '';
+  const courseTitle = payload?.course_title || '';
+  const courseDate = formatDisplayDate(payload?.session_date);
 
   return (
     <main className="app-shell">
       <section className="attendance-card">
-        <header className="card-header">
-          <h1>Course QR Sign-In</h1>
-          <p className="subtitle">Keep this screen open for participants to scan.</p>
-        </header>
-
-        {loading && <p className="status-line">Loading session…</p>}
-
-        {!loading && errorCode && (
-          <section className="alert alert-error" role="alert">
-            <h2>QR screen unavailable</h2>
-            <p>{errorCode === 'QR_SESSION_EXPIRED' ? 'This QR link has expired. Create a new QR link from Admin.' : 'This QR link is invalid.'}</p>
-          </section>
-        )}
-
         {!loading && !errorCode && payload && (
           <section className="qr-display-panel">
+            <h1>{courseTitle}</h1>
+            <p className="subtitle">{courseDate}</p>
             <img src={toQrImageUrl(signInUrl)} alt="Course sign-in QR code" className="qr-image" />
-            <p className="subtitle">Course ID: {payload.course_id}</p>
-            <p className="hint">Token refreshes automatically every few seconds.</p>
-            <p className="hint">Session expires: {new Date(payload.session_expires_at).toLocaleString()}</p>
           </section>
         )}
       </section>
