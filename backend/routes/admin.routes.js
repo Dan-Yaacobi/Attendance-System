@@ -10,6 +10,7 @@ const {
   validateSessionPayload,
   validateEnrollmentPayload,
   validateEnrollmentReplacePayload,
+  validateEnrollmentUpdatePayload,
   validateAttendanceUpdatePayload
 } = require('../validators/admin.validator');
 const { getAuditLogs, logAdminAction } = require('../services/audit.service');
@@ -324,6 +325,49 @@ router.delete('/enrollments/:enrollmentId', requireAdminAuth, async (req, res, n
   }
 });
 
+router.put('/enrollments/:enrollmentId', requireAdminAuth, async (req, res, next) => {
+  try {
+    const enrollmentId = Number(req.params.enrollmentId);
+    const payload = validateEnrollmentUpdatePayload(req.body);
+    const before = await db.query('SELECT * FROM course_enrollments WHERE id = $1', [enrollmentId]);
+
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (Object.prototype.hasOwnProperty.call(payload, 'phone')) {
+      fields.push(`phone = $${idx++}`);
+      values.push(payload.phone);
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'email')) {
+      fields.push(`email = $${idx++}`);
+      values.push(payload.email);
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'first_name')) {
+      fields.push(`first_name = $${idx++}`);
+      values.push(payload.first_name);
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'last_name')) {
+      fields.push(`last_name = $${idx++}`);
+      values.push(payload.last_name);
+    }
+    fields.push('updated_at = NOW()');
+    values.push(enrollmentId);
+
+    const result = await db.query(
+      `UPDATE course_enrollments
+       SET ${fields.join(', ')}
+       WHERE id = $${idx}
+       RETURNING *`,
+      values
+    );
+
+    await logAdminAction({ adminId: req.admin.id, actionType: 'enrollment_update', entityType: 'enrollment', entityId: enrollmentId, oldValues: before.rows[0], newValues: result.rows[0] });
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.put('/courses/:courseId/enrollments/replace', requireAdminAuth, async (req, res, next) => {
   const client = await db.pool.connect();
   try {
@@ -344,7 +388,7 @@ router.put('/courses/:courseId/enrollments/replace', requireAdminAuth, async (re
     await client.query('COMMIT');
 
     await logAdminAction({ adminId: req.admin.id, actionType: 'enrollment_replace', entityType: 'course', entityId: courseId, oldValues: before.rows, newValues: after.rows });
-    res.json({ success: true, data: { replaced_count: after.rowCount } });
+    res.json({ success: true, data: { replaced_count: after.rowCount, rows: after.rows } });
   } catch (error) {
     await client.query('ROLLBACK');
     next(error);

@@ -4,18 +4,19 @@ Enrollment Excel Upload Format (.xlsx)
 The enrollment upload reads only the FIRST worksheet in the workbook.
 
 Required structure:
-1) Row 1 must be the header row.
-2) Supported header names (case-insensitive):
-   - first_name (or firstname)
-   - last_name (or lastname)
-   - phone
-   - email
-3) Each subsequent row is treated as one enrollment record.
+1) Row 1 is treated as a header/ignored row (the text in it can be anything).
+2) Data starts on row 2.
+3) Column mapping is positional:
+   - Column A => first_name
+   - Column B => last_name
+   - Column C => phone
+   - Column D => email
 
 What the code assumes:
 - phone and email are required by the backend for every row.
 - first_name and last_name are optional.
 - cells are converted to text and trimmed.
+- phone is normalized to digits only (for example: 054-1234567 => 0541234567).
 - blank rows are still parsed if they exist in the sheet; backend validation may reject them.
 - duplicate phone/email values (after backend normalization) within the same course will fail upload.
 

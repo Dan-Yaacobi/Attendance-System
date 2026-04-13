@@ -63,6 +63,33 @@ function validateEnrollmentReplacePayload(body) {
   };
 }
 
+function validateEnrollmentUpdatePayload(body) {
+  if (!body || typeof body !== 'object') {
+    throw createValidationError('body is required.');
+  }
+
+  const hasAnyField = ['phone', 'email', 'first_name', 'last_name'].some((field) => Object.prototype.hasOwnProperty.call(body, field));
+  if (!hasAnyField) {
+    throw createValidationError('At least one enrollment field is required.');
+  }
+
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(body, 'phone')) {
+    payload.phone = requireString(body.phone, 'phone');
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'email')) {
+    payload.email = requireString(body.email, 'email').toLowerCase();
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'first_name')) {
+    payload.first_name = (body.first_name || '').trim() || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'last_name')) {
+    payload.last_name = (body.last_name || '').trim() || null;
+  }
+
+  return payload;
+}
+
 function validateAttendanceUpdatePayload(body) {
   return {
     participant_id: Number(body?.participant_id),
@@ -79,5 +106,6 @@ module.exports = {
   validateSessionPayload,
   validateEnrollmentPayload,
   validateEnrollmentReplacePayload,
+  validateEnrollmentUpdatePayload,
   validateAttendanceUpdatePayload
 };

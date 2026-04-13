@@ -8,7 +8,7 @@ function normalizeEnrollmentRow(row) {
   return {
     first_name: (row.first_name || row.firstname || '').toString().trim(),
     last_name: (row.last_name || row.lastname || '').toString().trim(),
-    phone: (row.phone || '').toString().trim(),
+    phone: (row.phone || '').toString().replace(/\D/g, '').trim(),
     email: (row.email || '').toString().trim()
   };
 }
@@ -147,14 +147,12 @@ function parseWorksheetRows(worksheetXml, sharedStrings) {
     return row;
   });
 
-  const headers = (table[0] || []).map((header) => String(header || '').trim().toLowerCase());
-  return table.slice(1).map((row) => {
-    const obj = {};
-    headers.forEach((header, idx) => {
-      obj[header] = row[idx] || '';
-    });
-    return obj;
-  });
+  return table.slice(1).map((row) => ({
+    first_name: row[0] || '',
+    last_name: row[1] || '',
+    phone: row[2] || '',
+    email: row[3] || ''
+  }));
 }
 
 function formatCourseMonthYear(course) {
@@ -374,6 +372,7 @@ export default function AdminApp() {
                 courseId={selectedCourseId}
                 enrollments={enrollments}
                 reload={() => loadEnrollments(selectedCourseId)}
+                onEnrollmentsChange={setEnrollments}
               />
             ) : (
               <section className="admin-panel"><p>Please select a course to continue.</p></section>
@@ -536,12 +535,28 @@ function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSess
   </section>;
 }
 
-function EnrollmentsSection({ courseId, enrollments, reload }) {
+function EnrollmentsSection({ courseId, enrollments, reload, onEnrollmentsChange }) {
   const [row, setRow] = useState({ first_name: '', last_name: '', phone: '', email: '' });
   const [selectedWorkbook, setSelectedWorkbook] = useState(null);
   const [parsedRows, setParsedRows] = useState([]);
   const [browseStatus, setBrowseStatus] = useState('');
   const [uploadStatus, setUploadStatus] = useState('');
+  const [editRows, setEditRows] = useState({});
+
+  useEffect(() => {
+    const next = {};
+    enrollments.forEach((enrollment) => {
+      next[enrollment.id] = {
+        first_name: enrollment.first_name || '',
+        last_name: enrollment.last_name || '',
+        phone: enrollment.phone || '',
+        email: enrollment.email || ''
+      };
+    });
+    setEditRows(next);
+  }, [enrollments]);
+
+  const normalizePhone = (phone) => String(phone || '').replace(/\D/g, '');
 
   const addRow = async (e) => {
     e.preventDefault();
@@ -549,10 +564,10 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(row)
+      body: JSON.stringify({ ...row, phone: normalizePhone(row.phone) })
     });
     setRow({ first_name: '', last_name: '', phone: '', email: '' });
-    reload();
+    await reload();
   };
 
   const browseWorkbook = async (e) => {
@@ -602,9 +617,21 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
     }
 
     setUploadStatus(`Upload successful: replaced ${data.data?.replaced_count || 0} enrollment(s).`);
+    if (Array.isArray(data.data?.rows)) {
+      onEnrollmentsChange(data.data.rows);
+    } else {
+      await reload();
+    }
     setSelectedWorkbook(null);
     setParsedRows([]);
-    reload();
+    setBrowseStatus('');
+  };
+
+  const clearSelectedWorkbook = () => {
+    setSelectedWorkbook(null);
+    setParsedRows([]);
+    setBrowseStatus('');
+    setUploadStatus('');
   };
 
   const clearSelectedWorkbook = () => {
@@ -616,7 +643,29 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
 
   const removeEnrollment = async (id) => {
     await apiRequest(`/admin/enrollments/${id}`, { method: 'DELETE', credentials: 'include' });
-    reload();
+    await reload();
+  };
+
+  const saveEnrollment = async (id) => {
+    const draft = editRows[id];
+    if (!draft) return;
+    const payload = {
+      ...draft,
+      phone: normalizePhone(draft.phone),
+      email: (draft.email || '').trim().toLowerCase()
+    };
+    const { ok, data } = await apiRequest(`/admin/enrollments/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    if (!ok || !data?.success) {
+      setUploadStatus(`Update failed for enrollment ${id}: ${data?.error?.message || 'unknown error'}`);
+      return;
+    }
+    setUploadStatus(`Enrollment ${id} updated successfully.`);
+    await reload();
   };
 
   return <section className="admin-panel"><h3>Enrollments</h3>
@@ -637,7 +686,20 @@ function EnrollmentsSection({ courseId, enrollments, reload }) {
       <button type="submit">Add Enrollment</button>
     </form>
     <table className="admin-table"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th /></tr></thead><tbody>
-      {enrollments.map((enrollment) => <tr key={enrollment.id}><td>{enrollment.first_name} {enrollment.last_name}</td><td>{enrollment.phone}</td><td>{enrollment.email}</td><td><button onClick={() => removeEnrollment(enrollment.id)}>Delete</button></td></tr>)}
+      {enrollments.map((enrollment) => <tr key={enrollment.id}>
+        <td>
+          <input value={editRows[enrollment.id]?.first_name || ''} onChange={(e) => setEditRows((prev) => ({ ...prev, [enrollment.id]: { ...prev[enrollment.id], first_name: e.target.value } }))} placeholder="First" />
+          <input value={editRows[enrollment.id]?.last_name || ''} onChange={(e) => setEditRows((prev) => ({ ...prev, [enrollment.id]: { ...prev[enrollment.id], last_name: e.target.value } }))} placeholder="Last" />
+        </td>
+        <td><input value={editRows[enrollment.id]?.phone || ''} onChange={(e) => setEditRows((prev) => ({ ...prev, [enrollment.id]: { ...prev[enrollment.id], phone: e.target.value } }))} /></td>
+        <td><input value={editRows[enrollment.id]?.email || ''} onChange={(e) => setEditRows((prev) => ({ ...prev, [enrollment.id]: { ...prev[enrollment.id], email: e.target.value } }))} /></td>
+        <td>
+          <div className="inline-actions">
+            <button type="button" onClick={() => saveEnrollment(enrollment.id)}>Save</button>
+            <button type="button" onClick={() => removeEnrollment(enrollment.id)}>Delete</button>
+          </div>
+        </td>
+      </tr>)}
     </tbody></table>
   </section>;
 }
