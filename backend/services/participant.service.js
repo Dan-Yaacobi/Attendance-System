@@ -1,6 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const db = require('../db');
 const { validateSessionForToday } = require('./session.service');
+const { validateSignInToken } = require('./qr-session.service');
 
 function createServiceError(code, message, status) {
   const error = new Error(message);
@@ -128,6 +129,7 @@ async function insertAttendanceRecord(sessionId, participantId, deviceUuid) {
 async function signInAndMarkAttendance(payload) {
   const normalizedPhone = normalizePhone(payload.phone);
   const normalizedEmail = normalizeEmail(payload.email);
+  await validateSignInToken({ sapCourseId: payload.course_id, token: payload.token });
   const { course, session } = await validateSessionForToday(payload.course_id);
 
   const enrollment = await ensureEnrollmentEligibility(course.id, normalizedPhone, normalizedEmail);
