@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE_URL, apiRequest } from './api';
 import './theme.css';
-import { toIsoCalendarDate } from './dateUtils';
 
 const navItems = ['Dashboard', 'Courses', 'Enrollments', 'Attendance', 'Participants', 'Logs'];
 
@@ -337,7 +336,7 @@ function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSess
                 <ul>
                   {sessions.map((session) => (
                     <li key={session.id}>
-                      <span>{toIsoCalendarDate(session.session_date)}</span>
+                      <span>{session.session_date}</span>
                       <button onClick={() => deleteSession(session.id, course.id)} className="danger-btn">Delete</button>
                     </li>
                   ))}
@@ -428,7 +427,7 @@ function AttendanceSection({ courseId, attendance, reload }) {
 
   return <section className="admin-panel"><h3>Attendance</h3>
     <a href={`${API_BASE_URL}/admin/courses/${courseId}/attendance/export`} target="_blank" rel="noreferrer">Export CSV</a>
-    <table className="admin-table"><thead><tr><th>Participant</th>{attendance.sessions.map((session) => <th key={session.id}>{toIsoCalendarDate(session.session_date)}</th>)}</tr></thead><tbody>
+    <table className="admin-table"><thead><tr><th>Participant</th>{attendance.sessions.map((session) => <th key={session.id}>{session.session_date}</th>)}</tr></thead><tbody>
       {Object.values(grouped).map((row) => <tr key={row.person.participant_id}><td>{row.person.first_name} {row.person.last_name}</td>
         {attendance.sessions.map((session) => {
           const cell = row.sessions[session.id];
