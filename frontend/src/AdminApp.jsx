@@ -634,6 +634,13 @@ function EnrollmentsSection({ courseId, enrollments, reload, onEnrollmentsChange
     setUploadStatus('');
   };
 
+  const clearSelectedWorkbook = () => {
+    setSelectedWorkbook(null);
+    setParsedRows([]);
+    setBrowseStatus('');
+    setUploadStatus('');
+  };
+
   const removeEnrollment = async (id) => {
     await apiRequest(`/admin/enrollments/${id}`, { method: 'DELETE', credentials: 'include' });
     await reload();
