@@ -7,6 +7,7 @@ const {
 } = require('../validators/attendance.validator');
 const { signInAndMarkAttendance } = require('../services/participant.service');
 const { markAttendanceByDevice } = require('../services/device.service');
+const { getQrDisplayPayload } = require('../services/qr-session.service');
 
 const router = express.Router();
 
@@ -42,6 +43,20 @@ router.post('/sign-in', async (req, res, next) => {
   try {
     const payload = validateSignInPayload(req.body);
     const result = await signInAndMarkAttendance(payload);
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+router.get('/qr-display/:sessionId', async (req, res, next) => {
+  try {
+    const result = await getQrDisplayPayload(req.params.sessionId);
 
     res.json({
       success: true,

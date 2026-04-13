@@ -13,6 +13,7 @@ const {
   validateAttendanceUpdatePayload
 } = require('../validators/admin.validator');
 const { getAuditLogs, logAdminAction } = require('../services/audit.service');
+const { createQrSession } = require('../services/qr-session.service');
 
 const router = express.Router();
 
@@ -148,6 +149,31 @@ router.post('/courses', requireAdminAuth, async (req, res, next) => {
     );
     await logAdminAction({ adminId: req.admin.id, actionType: 'course_create', entityType: 'course', entityId: result.rows[0].id, newValues: result.rows[0] });
     res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+router.post('/courses/:courseId/qr-session', requireAdminAuth, async (req, res, next) => {
+  try {
+    const courseId = Number(req.params.courseId);
+    const courseResult = await db.query('SELECT id FROM courses WHERE id = $1', [courseId]);
+
+    if (!courseResult.rows[0]) {
+      throw createError('COURSE_NOT_FOUND', 'Course was not found.', 404);
+    }
+
+    const qrSession = await createQrSession({ courseId, adminId: req.admin.id });
+    await logAdminAction({
+      adminId: req.admin.id,
+      actionType: 'qr_session_create',
+      entityType: 'course',
+      entityId: courseId,
+      newValues: { session_id: qrSession.session_id, expires_at: qrSession.expires_at }
+    });
+
+    res.status(201).json({ success: true, data: qrSession });
   } catch (error) {
     next(error);
   }

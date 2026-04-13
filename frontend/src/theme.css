@@ -343,3 +343,42 @@ button:disabled {
 .danger-btn:hover:not(:disabled) {
   background: #8f1a12;
 }
+
+.qr-display-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.qr-image {
+  width: min(360px, 100%);
+  border: 1px solid #d8cdf5;
+  border-radius: 12px;
+  padding: 0.5rem;
+  background: white;
+}
+
+.qr-link-panel {
+  margin: 0.75rem 0;
+  padding: 0.8rem;
+  border-radius: 10px;
+  border: 1px solid #d8cdf5;
+  background: #f8f4ff;
+}
+
+.qr-link-actions {
+  margin-top: 0.7rem;
+}
+
+.inline-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.inline-actions a {
+  color: var(--lahav-purple-strong);
+  font-weight: 700;
+}

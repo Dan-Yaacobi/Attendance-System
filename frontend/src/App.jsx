@@ -19,7 +19,7 @@ function clearStoredDeviceUuid(courseId) {
 }
 
 const FRIENDLY_ERROR_MESSAGES = {
-  INVALID_QR: 'קוד ה-QR לא כולל פרטי קורס. נא לסרוק קוד תקין של הקורס.',
+  INVALID_QR: 'קוד ה-QR לא כולל פרטי קורס או טוקן תקין. נא לסרוק קוד חדש.',
   COURSE_NOT_FOUND: 'לא הצלחנו למצוא את הקורס הזה. נא לוודא שסרקת את הקוד הנכון.',
   NO_SESSION_TODAY: 'אין מפגש פעיל לקורס זה היום.',
   INVALID_DEVICE_UUID: 'המכשיר הזה כבר לא מזוהה עבור הקורס. נא להתחבר מחדש.',
@@ -29,6 +29,8 @@ const FRIENDLY_ERROR_MESSAGES = {
   VALIDATION_ERROR: 'חלק מהפרטים חסרים או לא תקינים. נא לבדוק את הנתונים ולנסות שוב.',
   SIGN_IN_FAILED: 'לא הצלחנו להשלים התחברות כרגע. נא לנסות שוב בעוד רגע.',
   MARK_BY_DEVICE_FAILED: 'לא הצלחנו לאמת את המכשיר כרגע. נא לנסות להתחבר מחדש.',
+  TOKEN_INVALID: 'פג תוקף או אינו תקין. נא לסרוק שוב את ה-QR הפעיל בכיתה.',
+  TOKEN_EXPIRED: 'פג תוקף או אינו תקין. נא לסרוק שוב את ה-QR הפעיל בכיתה.',
   DEVICE_UUID_MISSING: 'ההתחברות הצליחה, אך חסר מזהה מכשיר לאימות. נא לנסות שוב.',
   UNKNOWN_ERROR: 'אירעה תקלה לא צפויה. נא לנסות שוב.',
 };
@@ -58,9 +60,12 @@ function tryFixMojibake(value) {
 }
 
 function App() {
-  const courseId = useMemo(() => {
+  const { courseId, token } = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('course_id');
+    return {
+      courseId: params.get('course_id'),
+      token: params.get('token')
+    };
   }, []);
 
   const [loading, setLoading] = useState(true);
@@ -118,6 +123,10 @@ function App() {
           setIfMounted(setParticipantFirstName, storedFirstName);
         }
         if (!storedDeviceUuid) {
+          if (!token) {
+            setIfMounted(setErrorCode, 'INVALID_QR');
+            return;
+          }
           setIfMounted(setNeedsSignIn, true);
           return;
         }
@@ -174,7 +183,7 @@ function App() {
     return () => {
       isMounted = false;
     };
-  }, [courseId]);
+  }, [courseId, token]);
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -187,7 +196,7 @@ function App() {
   const handleSignIn = async (event) => {
     event.preventDefault();
 
-    if (!courseId) {
+    if (!courseId || !token) {
       setErrorCode('INVALID_QR');
       return;
     }
@@ -203,6 +212,7 @@ function App() {
         },
         body: JSON.stringify({
           course_id: courseId,
+          token,
           phone: form.phone,
           email: form.email,
         }),

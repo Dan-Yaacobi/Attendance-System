@@ -274,6 +274,8 @@ export default function AdminApp() {
 function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSessions }) {
   const [form, setForm] = useState({ sap_course_id: '', course_title: '', month: '', year: '' });
   const [newSessionByCourse, setNewSessionByCourse] = useState({});
+  const [qrLinkByCourse, setQrLinkByCourse] = useState({});
+  const [creatingQrFor, setCreatingQrFor] = useState('');
 
   const saveCourse = async (e) => {
     e.preventDefault();
@@ -310,6 +312,32 @@ function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSess
     reloadCourses();
   };
 
+
+  const createQrLink = async (courseId) => {
+    setCreatingQrFor(String(courseId));
+    const { ok, data } = await apiRequest(`/admin/courses/${courseId}/qr-session`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+
+    if (ok && data.success) {
+      setQrLinkByCourse((prev) => ({ ...prev, [courseId]: data.data }));
+    }
+
+    setCreatingQrFor('');
+  };
+
+  const copyQrLink = async (courseId) => {
+    const link = qrLinkByCourse[courseId]?.qr_link;
+    if (!link) return;
+
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      window.prompt('Copy this QR link:', link);
+    }
+  };
+
   return <section className="admin-panel"><h3>Courses</h3>
     <form onSubmit={saveCourse} className="admin-grid-form">
       <input placeholder="SAP Course ID" value={form.sap_course_id} onChange={(e) => setForm({ ...form, sap_course_id: e.target.value })} />
@@ -341,6 +369,21 @@ function CoursesSection({ courses, sessionsByCourseId, reloadCourses, reloadSess
                     </li>
                   ))}
                 </ul>
+              )}
+            </section>
+
+            <section className="qr-link-panel">
+              <button onClick={() => createQrLink(course.id)} disabled={creatingQrFor === String(course.id)}>
+                {creatingQrFor === String(course.id) ? 'Creating…' : 'Create QR Link'}
+              </button>
+              {qrLinkByCourse[course.id]?.qr_link && (
+                <div className="qr-link-actions">
+                  <input value={qrLinkByCourse[course.id].qr_link} readOnly />
+                  <div className="inline-actions">
+                    <button onClick={() => copyQrLink(course.id)} type="button">Copy Link</button>
+                    <a href={qrLinkByCourse[course.id].qr_link} target="_blank" rel="noreferrer">Open QR Screen</a>
+                  </div>
+                </div>
               )}
             </section>
 
