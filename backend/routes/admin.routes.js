@@ -19,7 +19,11 @@ const { createQrSession } = require('../services/qr-session.service');
 const router = express.Router();
 
 const loginAttempts = new Map();
-const SESSION_TTL_HOURS = 8;
+const SESSION_TTL_HOURS = Number(process.env.ADMIN_SESSION_TTL_HOURS || 24);
+const LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
+const isProduction = process.env.NODE_ENV === 'production';
+const cookieName = SESSION_COOKIE_NAME;
 
 function createError(code, message, status = 400) {
   const error = new Error(message);
@@ -29,27 +33,26 @@ function createError(code, message, status = 400) {
 }
 
 function setAdminCookie(res, token) {
-  const secure = process.env.NODE_ENV === 'production';
-  const cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${60 * 60 * SESSION_TTL_HOURS}; SameSite=Strict${secure ? '; Secure' : ''}`;
+  const cookie = `${cookieName}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${60 * 60 * SESSION_TTL_HOURS}; SameSite=Lax${isProduction ? '; Secure' : ''}`;
   res.setHeader('Set-Cookie', cookie);
 }
 
 function clearAdminCookie(res) {
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Strict`);
+  res.setHeader('Set-Cookie', `${cookieName}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${isProduction ? '; Secure' : ''}`);
 }
 
-function checkLoginRateLimit(email, ip) {
-  const key = `${email}:${ip}`;
-  const entry = loginAttempts.get(key) || { count: 0, resetAt: Date.now() + 10 * 60 * 1000 };
+function checkLoginRateLimit(ip) {
+  const key = ip || 'unknown';
+  const entry = loginAttempts.get(key) || { count: 0, resetAt: Date.now() + LOGIN_RATE_LIMIT_WINDOW_MS };
 
   if (Date.now() > entry.resetAt) {
     entry.count = 0;
-    entry.resetAt = Date.now() + 10 * 60 * 1000;
+    entry.resetAt = Date.now() + LOGIN_RATE_LIMIT_WINDOW_MS;
   }
 
   entry.count += 1;
   loginAttempts.set(key, entry);
-  if (entry.count > 5) {
+  if (entry.count > LOGIN_RATE_LIMIT_MAX_ATTEMPTS) {
     throw createError('RATE_LIMITED', 'Too many login attempts', 429);
   }
 }
@@ -57,7 +60,7 @@ function checkLoginRateLimit(email, ip) {
 router.post('/auth/login', async (req, res, next) => {
   try {
     const payload = validateAdminLoginPayload(req.body);
-    checkLoginRateLimit(payload.email, req.ip);
+    checkLoginRateLimit(req.ip);
 
     const adminResult = await db.query(
       'SELECT id, email, full_name, password_hash, is_active FROM admins WHERE email = $1 LIMIT 1',
@@ -65,8 +68,7 @@ router.post('/auth/login', async (req, res, next) => {
     );
 
     const admin = adminResult.rows[0];
-    const passwordHash = admin.password_hash;
-    const passwordOk = await bcrypt.compare(payload.password, passwordHash);
+    const passwordOk = admin ? await bcrypt.compare(payload.password, admin.password_hash) : false;
 
     if (!admin || !admin.is_active || !passwordOk) {
       await logAdminAction({ actionType: 'login_failed', entityType: 'auth', newValues: { email: payload.email, ip: req.ip } });

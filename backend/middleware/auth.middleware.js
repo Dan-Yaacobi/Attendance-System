@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const db = require('../db');
 
-const SESSION_COOKIE_NAME = 'admin_session';
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'admin_session';
 
 function parseCookies(header) {
   if (!header) return {};
